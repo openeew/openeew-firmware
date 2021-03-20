@@ -1,3 +1,0 @@
-(sym_lib_table
-  (lib (name Sensor_Motion_local)(type Legacy)(uri ${KIPRJMOD}/local/library/Sensor_Motion_local.lib)(options "")(descr ""))
-)
