@@ -44,6 +44,7 @@ static char MQTT_ORGID[7];            // Watson IoT 6 character orgid
 #define MQTT_TOPIC_FWCHECK    "iot-2/cmd/firmwarecheck/fmt/json"
 #define MQTT_TOPIC_SEND10SEC  "iot-2/cmd/10secondhistory/fmt/json"
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
+#define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
 char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
@@ -299,6 +300,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
         breathedirection = true;
       }
       jsonMQTTReceiveDoc.clear();
+    } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
+      Serial.println("Restarting Device...");
+      esp_restart();
     } else {
       Serial.println("Unknown command received");
     }
@@ -505,6 +509,7 @@ void Connect2MQTTbroker() {
       mqtt.subscribe(MQTT_TOPIC_FWCHECK);
       mqtt.subscribe(MQTT_TOPIC_SEND10SEC);
       mqtt.subscribe(MQTT_TOPIC_SENDACCEL);
+      mqtt.subscribe(MQTT_TOPIC_RESTART);
       mqtt.setBufferSize(2000);
       mqtt.loop();
     } else {
