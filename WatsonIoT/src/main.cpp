@@ -49,8 +49,9 @@ char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
 // If an OTA firmware upgrade is required, the binary is downloaded from a secure server
-#define DOWNLOAD_CERT_PEM_FILE     "/mybluemix-net-chain.pem"
+//#define DOWNLOAD_CERT_PEM_FILE   "/mybluemix-net-chain.pem"
 //#define DOWNLOAD_CERT_PEM_FILE   "/github-com-chain.pem"
+#define DOWNLOAD_CERT_PEM_FILE     "/openeew-com-chain.pem"
 #define WATSON_IOT_PLATFORM_CA_PEM "/messaging.pem"
 
 // Timezone info
@@ -355,7 +356,7 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
           Serial.printf("Reading %s pem server certificate chain failed.\r\n",DOWNLOAD_CERT_PEM_FILE);
         } else {
           Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DOWNLOAD_CERT_PEM_FILE);
-          //Serial.println( DownloadServerPemChain );
+          //Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
 
           // Increase the watchdog timer before starting the firmware upgrade
           // The download and write can trip the watchdog timer and the old firmware
