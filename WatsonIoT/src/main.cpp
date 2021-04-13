@@ -129,11 +129,6 @@ int QUE_len = LTA_len + STA_len;
 
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
-DynamicJsonDocument jsonDoc(4000);
-DynamicJsonDocument jsonTraces(4000);
-JsonArray traces = jsonTraces.to<JsonArray>();
-static char msg[2000];
-
 // 10 second FIFO queue for STA / LTA algorithm
 typedef struct AccelXYZ {
   double x; double y; double z;
@@ -543,21 +538,20 @@ void Send10Seconds2Cloud() {
   // DynamicJsonDocument is stored on the heap
   // Allocate a ArduinoJson buffer large enough to 10 seconds of Accelerometer trace data
   DynamicJsonDocument historydoc(16384);
-  JsonObject payload = historydoc.to<JsonObject>();
-  JsonObject status = payload.createNestedObject("d");
-  JsonArray  alltraces = status.createNestedArray("traces");
+  JsonObject payload      = historydoc.to<JsonObject>();
+  JsonObject status       = payload.createNestedObject("d");
+  JsonArray  alltraces    = status.createNestedArray("traces");
+  JsonObject acceleration = alltraces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   status["device_id"] = deviceID ;
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
-  JsonObject acceleration = alltraces.createNestedObject();
-
   AccelReading AccelRecord ;
-  //char reading[75];
   for( uint16_t idx=0; idx < StaLtaQue.getCount(); idx++ ) {
     if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
+      //char reading[75];
       //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
       //Serial.println(reading);
 
@@ -592,16 +586,44 @@ void Send10Seconds2Cloud() {
 void SendLiveData2Cloud() {
   // variables to hold accelerometer data
   // DynamicJsonDocument is stored on the heap
-  JsonObject payload = jsonDoc.to<JsonObject>();
-  JsonObject status = payload.createNestedObject("d");
+  DynamicJsonDocument jsonDoc(3000);
+  JsonObject payload      = jsonDoc.to<JsonObject>();
+  JsonObject status       = payload.createNestedObject("d");
+  JsonArray  traces       = status.createNestedArray("traces");
+  JsonObject acceleration = traces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   status["device_id"] = deviceID;
-  status["traces"] = traces;
 
-  // Serialize the entire string to be transmitted
+  // Generate an array of json objects that contain x,y,z arrays of 32 floats.
+  // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
+  AccelReading AccelRecord ;
+  // Send the last 32 records (or less) from the queue
+  uint16_t idx = StaLtaQue.getCount() ;
+  if( idx >= 32 ) {
+    idx = idx - 32;
+  }
+  for( ; idx < StaLtaQue.getCount(); idx++ ) {
+    if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
+      //char reading[75];
+      //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
+      //Serial.println(reading);
+
+      acceleration["x"].add(AccelRecord.x);
+      acceleration["y"].add(AccelRecord.y);
+      acceleration["z"].add(AccelRecord.z);
+    }
+  }
+
+  // Serialize the current second Json object into a string to be transmitted
+  static char msg[2000];
   serializeJson(jsonDoc, msg, 2000);
   Serial.println(msg);
+
+  int jsonSize = measureJson(jsonDoc);
+  Serial.print("Sending 1 second of accelerometer readings in a MQTT packet of size: ");
+  Serial.println( jsonSize );
+  mqtt.setBufferSize( (jsonSize + 50 ));  // increase the MQTT buffer size
 
   // Publish the message to MQTT Broker
   if (!mqtt.publish(MQTT_TOPIC, msg)) {
@@ -610,6 +632,7 @@ void SendLiveData2Cloud() {
     NeoPixelStatus( LED_CONNECTED ); // Success - blink cyan
   }
 
+  mqtt.setBufferSize( 2000 );  // reset the MQTT buffer size
   jsonDoc.clear();
 }
 
@@ -852,10 +875,6 @@ void loop() {
       //Serial.println( xPortGetFreeHeapSize() );
       int numEntriesFifo = adxl355.readFifoEntries( (long *)fifoOut ) ;
       if ( numEntriesFifo != -1 ) {
-        // Generate an array of json objects that contain x,y,z arrays of 32 floats.
-        // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
-        JsonObject acceleration = traces.createNestedObject();
-
         // Declare one AccelReading structure for this iteration of loop()
         // so it doesn't need to go in and out of scope in various for() loops below
         //   typedef struct AccelXYZ {
@@ -869,17 +888,14 @@ void loop() {
         for (int i = 0; i < numEntriesFifo; i++) {
           gal = adxl355.valueToGals(fifoOut[i][0]);
           x = round(gal*1000)/1000;
-          acceleration["x"].add(x);
           AccelRecord.x = x;
 
           gal = adxl355.valueToGals(fifoOut[i][1]);
           y = round(gal*1000)/1000;
-          acceleration["y"].add(y);
           AccelRecord.y = y;
 
           gal = adxl355.valueToGals(fifoOut[i][2]);
           z = round(gal*1000)/1000;
-          acceleration["z"].add(z);
           AccelRecord.z = z;
 
           StaLtaQue.push(&AccelRecord);
@@ -1011,10 +1027,6 @@ void loop() {
           for( int i=0; i < 32; i++ )
             StaLtaQue.drop();
         }
-
-        // Clear & Reset JsonArrays
-        jsonTraces.clear();
-        traces = jsonTraces.to<JsonArray>();
 
         //Switch the direction of the LEDs
         breathedirection = breathedirection ? false : true;
