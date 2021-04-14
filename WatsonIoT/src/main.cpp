@@ -15,8 +15,6 @@
 #include "semver.h"  // from https://github.com/h2non/semver.c
 #include <cppQueue.h>
 
-
-
 // Watson IoT connection details
 static char MQTT_HOST[48];            // ORGID.messaging.internetofthings.ibmcloud.com
 static char MQTT_DEVICEID[30];        // Allocate a buffer large enough for "d:orgid:devicetype:deviceid"
@@ -35,12 +33,14 @@ static char MQTT_ORGID[7];            // Watson IoT 6 character orgid
 #define MQTT_TOPIC_FWCHECK    "iot-2/cmd/firmwarecheck/fmt/json"
 #define MQTT_TOPIC_SEND10SEC  "iot-2/cmd/10secondhistory/fmt/json"
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
+#define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
 char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
 // If an OTA firmware upgrade is required, the binary is downloaded from a secure server
-#define DOWNLOAD_CERT_PEM_FILE     "/mybluemix-net-chain.pem"
+//#define DOWNLOAD_CERT_PEM_FILE   "/mybluemix-net-chain.pem"
 //#define DOWNLOAD_CERT_PEM_FILE   "/github-com-chain.pem"
+#define DOWNLOAD_CERT_PEM_FILE     "/openeew-com-chain.pem"
 #define WATSON_IOT_PLATFORM_CA_PEM "/messaging.pem"
 
 // Timezone info
@@ -118,11 +118,6 @@ int QUE_len = LTA_len + STA_len;
 
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
-DynamicJsonDocument jsonDoc(4000);
-DynamicJsonDocument jsonTraces(4000);
-JsonArray traces = jsonTraces.to<JsonArray>();
-static char msg[2000];
-
 // 10 second FIFO queue for STA / LTA algorithm
 typedef struct AccelXYZ {
   double x; double y; double z;
@@ -290,6 +285,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
         breathedirection = true;
       }
       jsonMQTTReceiveDoc.clear();
+    } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
+      Serial.println("Restarting Device...");
+      esp_restart();
     } else {
       Serial.println("Unknown command received");
     }
@@ -342,7 +340,7 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
           Serial.printf("Reading %s pem server certificate chain failed.\r\n",DOWNLOAD_CERT_PEM_FILE);
         } else {
           Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DOWNLOAD_CERT_PEM_FILE);
-          //Serial.println( DownloadServerPemChain );
+          //Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
 
           // Increase the watchdog timer before starting the firmware upgrade
           // The download and write can trip the watchdog timer and the old firmware
@@ -496,6 +494,7 @@ void Connect2MQTTbroker() {
       mqtt.subscribe(MQTT_TOPIC_FWCHECK);
       mqtt.subscribe(MQTT_TOPIC_SEND10SEC);
       mqtt.subscribe(MQTT_TOPIC_SENDACCEL);
+      mqtt.subscribe(MQTT_TOPIC_RESTART);
       mqtt.setBufferSize(2000);
       mqtt.loop();
     } else {
@@ -528,21 +527,20 @@ void Send10Seconds2Cloud() {
   // DynamicJsonDocument is stored on the heap
   // Allocate a ArduinoJson buffer large enough to 10 seconds of Accelerometer trace data
   DynamicJsonDocument historydoc(16384);
-  JsonObject payload = historydoc.to<JsonObject>();
-  JsonObject status = payload.createNestedObject("d");
-  JsonArray  alltraces = status.createNestedArray("traces");
+  JsonObject payload      = historydoc.to<JsonObject>();
+  JsonObject status       = payload.createNestedObject("d");
+  JsonArray  alltraces    = status.createNestedArray("traces");
+  JsonObject acceleration = alltraces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   status["device_id"] = deviceID ;
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
-  JsonObject acceleration = alltraces.createNestedObject();
-
   AccelReading AccelRecord ;
-  //char reading[75];
   for( uint16_t idx=0; idx < StaLtaQue.getCount(); idx++ ) {
     if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
+      //char reading[75];
       //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
       //Serial.println(reading);
 
@@ -550,12 +548,11 @@ void Send10Seconds2Cloud() {
       acceleration["y"].add(AccelRecord.y);
       acceleration["z"].add(AccelRecord.z);
     }
-
   }
 
   // Serialize the History Json object into a string to be transmitted
   //serializeJson(historydoc,Serial);  // print to console
-  static char historymsg[16384];;
+  static char historymsg[16384];
   serializeJson(historydoc, historymsg, 16383);
 
   int jsonSize = measureJson(historydoc);
@@ -570,6 +567,7 @@ void Send10Seconds2Cloud() {
     NeoPixelStatus( LED_CONNECTED ); // Success - blink cyan
   }
 
+  mqtt.setBufferSize( 2000 );  // reset the MQTT buffer size
   historydoc.clear();
 }
 
@@ -577,16 +575,44 @@ void Send10Seconds2Cloud() {
 void SendLiveData2Cloud() {
   // variables to hold accelerometer data
   // DynamicJsonDocument is stored on the heap
-  JsonObject payload = jsonDoc.to<JsonObject>();
-  JsonObject status = payload.createNestedObject("d");
+  DynamicJsonDocument jsonDoc(3000);
+  JsonObject payload      = jsonDoc.to<JsonObject>();
+  JsonObject status       = payload.createNestedObject("d");
+  JsonArray  traces       = status.createNestedArray("traces");
+  JsonObject acceleration = traces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   status["device_id"] = deviceID;
-  status["traces"] = traces;
 
-  // Serialize the entire string to be transmitted
+  // Generate an array of json objects that contain x,y,z arrays of 32 floats.
+  // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
+  AccelReading AccelRecord ;
+  // Send the last 32 records (or less) from the queue
+  uint16_t idx = StaLtaQue.getCount() ;
+  if( idx >= 32 ) {
+    idx = idx - 32;
+  }
+  for( ; idx < StaLtaQue.getCount(); idx++ ) {
+    if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
+      //char reading[75];
+      //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
+      //Serial.println(reading);
+
+      acceleration["x"].add(AccelRecord.x);
+      acceleration["y"].add(AccelRecord.y);
+      acceleration["z"].add(AccelRecord.z);
+    }
+  }
+
+  // Serialize the current second Json object into a string to be transmitted
+  static char msg[2000];
   serializeJson(jsonDoc, msg, 2000);
   Serial.println(msg);
+
+  int jsonSize = measureJson(jsonDoc);
+  Serial.print("Sending 1 second of accelerometer readings in a MQTT packet of size: ");
+  Serial.println( jsonSize );
+  mqtt.setBufferSize( (jsonSize + 50 ));  // increase the MQTT buffer size
 
   // Publish the message to MQTT Broker
   if (!mqtt.publish(MQTT_TOPIC, msg)) {
@@ -595,6 +621,7 @@ void SendLiveData2Cloud() {
     NeoPixelStatus( LED_CONNECTED ); // Success - blink cyan
   }
 
+  mqtt.setBufferSize( 2000 );  // reset the MQTT buffer size
   jsonDoc.clear();
 }
 
@@ -833,43 +860,45 @@ void loop() {
     adxstatus = adxl355.getStatus();
 
     if (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL) {
+      // Keep track of the heap in case heap fragmentation returns
+      //Serial.println( xPortGetFreeHeapSize() );
       int numEntriesFifo = adxl355.readFifoEntries( (long *)fifoOut ) ;
       if ( numEntriesFifo != -1 ) {
-        // Generate an array of json objects that contain x,y,z arrays of 32 floats.
-        // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
-        JsonObject acceleration = traces.createNestedObject();
+        // Declare one AccelReading structure for this iteration of loop()
+        // so it doesn't need to go in and out of scope in various for() loops below
+        //   typedef struct AccelXYZ {
+        //     double x; double y; double z;
+        //   } AccelReading ;
+        AccelReading AccelRecord;
 
         // [{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]},{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]}]
         double gal;
         double x, y, z;
         for (int i = 0; i < numEntriesFifo; i++) {
-          AccelReading AccelRecord;
           gal = adxl355.valueToGals(fifoOut[i][0]);
           x = round(gal*1000)/1000;
-          acceleration["x"].add(x);
           AccelRecord.x = x;
 
           gal = adxl355.valueToGals(fifoOut[i][1]);
           y = round(gal*1000)/1000;
-          acceleration["y"].add(y);
           AccelRecord.y = y;
 
           gal = adxl355.valueToGals(fifoOut[i][2]);
           z = round(gal*1000)/1000;
-          acceleration["z"].add(z);
           AccelRecord.z = z;
 
           StaLtaQue.push(&AccelRecord);
         }
 
         // Do some STA / LTA math here...
-        // ...
+        char mathmsg[65];
+        sprintf(mathmsg, "Calculating STA/LTA from %d accelerometer readings", StaLtaQue.getCount());
+        //Serial.println(mathmsg);
         if( StaLtaQue.isFull() ) {
           /////////////////// find offset ////////////////
           int queCount = StaLtaQue.getCount( );
 
           for (int idx = 0; idx < queCount; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sample[0] = AccelRecord.x;
               sample[1] = AccelRecord.y;
@@ -882,13 +911,12 @@ void loop() {
           for (int j = 0; j < 3; j++) {
             offset[j]  = sampleSUM[j] / (QUE_len);
           }
-          
+
           /////////////////// find lta /////////////////
           sampleSUM[0] = 0;
           sampleSUM[1] = 0;
           sampleSUM[2] = 0;
           for (int idx = 0; idx < LTA_len; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sampleABS[0] = abs( AccelRecord.x - offset[0] );
               sampleABS[1] = abs( AccelRecord.y - offset[1] );
@@ -901,13 +929,12 @@ void loop() {
           for (int j = 0; j < 3; j++) {
             ltav[j]  = sampleSUM[j] / (LTA_len);
           }
-          
+
           //////////////////// find sta ///////////////////////
           sampleSUM[0] = 0;
           sampleSUM[1] = 0;
           sampleSUM[2] = 0;
           for (int idx = LTA_len-STA_len ; idx < LTA_len; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sampleABS[0] = abs( AccelRecord.x - offset[0] );
               sampleABS[1] = abs( AccelRecord.y - offset[1] );
@@ -924,7 +951,7 @@ void loop() {
               if ( stalta[j] >= thresh ) {
                 // Whoa - STA/LTA algorithm detected some anomalous shaking
                 Serial.printf("STA/LTA = %f = %f / %f (%i)\n", stalta[j], stav[j], ltav[j], j );
-                bPossibleEarthQuake = true ; 
+                bPossibleEarthQuake = true ;
               }
             }
           }
@@ -932,7 +959,6 @@ void loop() {
           //// find STA/LTA for the other 31 samples but without doing the summing again
 
           for (int idx = LTA_len+1; idx < QUE_len; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sample[0] = AccelRecord.x;
               sample[1] = AccelRecord.y;
@@ -966,34 +992,37 @@ void loop() {
           }
         }
 
-        // If STA/LTA algorithm detected some anomalous shaking
-        if( bPossibleEarthQuake ) {
+        if( numSecsOfAccelReadings > 0 ) {
+          SendLiveData2Cloud();
+          numSecsOfAccelReadings-- ;
           bPossibleEarthQuake=false;
+        } else if( bPossibleEarthQuake ) {
+          // The STA/LTA algorithm detected some anomalous shaking
+          // If this is continued shaking, the above SendLiveData2Cloud()
+          // function has already sent current accelerometer data
+          // so don't send it again.
+          bPossibleEarthQuake=false;
+
           // Start sending 5 minutes of live accelerometer data
+          Serial.println("Start sending 5 minutes of live accelerometer data");
           numSecsOfAccelReadings = 300 ;
+
           // Send the previous 10 seconds of history to the cloud
           Send10Seconds2Cloud();
         }
-        char mathmsg[65];
-        sprintf(mathmsg, "%d accelerometer readings on the StaLta Queue", StaLtaQue.getCount());
-        Serial.println(mathmsg);
-        // When the math is done, drop 32 records off the queue
+
+        // When this loop is done, drop 32 records off the queue
         if( StaLtaQue.isFull() ) {
           for( int i=0; i < 32; i++ )
             StaLtaQue.drop();
         }
 
-        if( numSecsOfAccelReadings > 0 ) {
-          SendLiveData2Cloud();
-          numSecsOfAccelReadings-- ;
-        }
-        // Clear & Reset JsonArrays
-        jsonTraces.clear();
-        traces = jsonTraces.to<JsonArray>();
-
         //Switch the direction of the LEDs
         breathedirection = breathedirection ? false : true;
       }
+
+    // Keep track of the heap in case heap fragmentation returns
+    //Serial.println( xPortGetFreeHeapSize() );
     }
   }
 
