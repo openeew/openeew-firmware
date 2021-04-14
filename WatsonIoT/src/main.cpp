@@ -376,34 +376,6 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
 }
 
 
-void GetGeoCoordinates( float *, float *);
-void GetGeoCoordinates( float *latitude, float *longitude) {
-  HTTPClient http;
-  #define GEOCOORD_APIKEY "9f0acd1eb4c51704c2f4429be20ba4c6"
-  http.begin( "http://api.ipstack.com/check?access_key=9f0acd1eb4c51704c2f4429be20ba4c6" );
-  int httpResponseCode = http.GET();
-  Serial.print("GetGeoCoordinates() ipstack HTTP Response code: ");
-  Serial.println(httpResponseCode);
-  String payload = http.getString();
-  http.end();  // free resources
-  Serial.print("ipstack HTTP get response payload: ");
-  Serial.println( payload );
-
-  if( httpResponseCode == 200 ) {  // Success
-    DynamicJsonDocument ReceiveDoc(900);
-    DeserializationError err = deserializeJson(ReceiveDoc, payload);
-    if (err) {
-      Serial.print(F("deserializeJson() failed with code : "));
-      Serial.println(err.c_str());
-    } else {
-      JsonObject GeoCoordData =  ReceiveDoc.as<JsonObject>();
-      *latitude  = GeoCoordData["latitude"];
-      *longitude = GeoCoordData["longitude"];
-    }
-  }
-}
-
-
 // Call the OpenEEW Device Activation endpoint to retrieve MQTT OrgID
 bool OpenEEWDeviceActivation() {
   // OPENEEW_ACTIVATION_ENDPOINT "https://openeew-earthquakes.mybluemix.net/activation?ver=1"
@@ -412,14 +384,6 @@ bool OpenEEWDeviceActivation() {
   Serial.println("Contacting the OpenEEW Device Activation Endpoint :");
   Serial.println(OPENEEW_ACTIVATION_ENDPOINT);
 
-/*
-  float lat, lng ;
-  GetGeoCoordinates( &lat, &lng );
-  Serial.print("GetGeoCoordinates() reported latitude,longitude : ");
-  Serial.print(lat,5);
-  Serial.print(",");
-  Serial.println(lng,5);
-*/
   HTTPClient http;
   // Domain name with URL path or IP address with path
   http.begin( OPENEEW_ACTIVATION_ENDPOINT );
@@ -431,9 +395,7 @@ bool OpenEEWDeviceActivation() {
   // '{"macaddress":"112233445566","lat":40.00000,"lng":-74.00000,"firmware_device":"1.0.0"}'
   DynamicJsonDocument httpSendDoc(120);
   String httpRequestData;
-  httpSendDoc["macaddress"] = deviceID;
-  //httpSendDoc["lat"] = lat;
-  //httpSendDoc["lng"] = lng;
+  httpSendDoc["macaddress"]      = deviceID;
   httpSendDoc["firmware_device"] = OPENEEW_FIRMWARE_VERSION;
   // Serialize the entire string to be transmitted
   serializeJson(httpSendDoc, httpRequestData);
