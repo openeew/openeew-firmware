@@ -118,6 +118,7 @@ This section describes the various commands that can be sent to the OpenEEW firm
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
 #define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
 #define MQTT_TOPIC_THRESHOLD  "iot-2/cmd/threshold/fmt/json"
+#define MQTT_TOPIC_FACTORYRST "iot-2/cmd/factoryreset/fmt/json"
 ```
 
 ### ALARM
@@ -247,6 +248,17 @@ The  message `{ThresholdOverride:<double>}` will publish a double to the device.
 mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/threshold/fmt/json -m {ThresholdOverride:10.2} -i cmd:threshold
 
 mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i a:OrgID:mosquitto -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/threshold/fmt/json -m {ThresholdOverride:10.2}
+```
+
+#### FACTORY RESET
+
+The OpenEEW dashboard allows you to "Remove your sensor from the OpenEEW network" button. It promises that your sensor will no longer contribute data.
+This MQTT topic does a "reset to factory defaults".  It remove all WiFi SSID / password from NVM ram and then restarts the device. The device restarts into SmartConfig Provisioning mode.  Once the device is in SmartConfig Provisioning mode, the mobile app can be used to connect it to a different WiFi network and register it again (potentially under a different email address / user)
+
+```sh
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/factoryreset/fmt/json -m {} -i cmd:restart
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/factoryreset/fmt/json  -m {}
 ```
 
 ### Python Examples

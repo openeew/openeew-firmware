@@ -35,6 +35,7 @@ static char MQTT_ORGID[7];            // Watson IoT 6 character orgid
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
 #define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
 #define MQTT_TOPIC_THRESHOLD  "iot-2/cmd/threshold/fmt/json"
+#define MQTT_TOPIC_FACTORYRST "iot-2/cmd/factoryreset/fmt/json"
 char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
@@ -132,6 +133,7 @@ int  numScannedNetworks();
 int  numNetworksStored();
 void readNetworkStored(int netId);
 void storeNetwork(String ssid, String pswd);
+void clearNetworks();
 bool WiFiScanAndConnect();
 bool startSmartConfig();
 
@@ -313,6 +315,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
       thresh = cmdData["ThresholdOverride"].as<double>();
       snprintf( newthreshmsg, 49, "Override STA/LTA Shake Threshold : %5.2f", thresh);
       Serial.println(newthreshmsg);
+    } else if ( strcmp(topic, MQTT_TOPIC_FACTORYRST) == 0 ) {
+      // Remote message received to factory reset the device
+      Serial.println("Remote message received to factory reset the device.");
+      clearNetworks();
+      Serial.println("Restarting Device...");
+      esp_restart();
     } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
       Serial.println("Restarting Device...");
       esp_restart();
@@ -486,6 +494,7 @@ void Connect2MQTTbroker() {
       mqtt.subscribe(MQTT_TOPIC_SENDACCEL);
       mqtt.subscribe(MQTT_TOPIC_RESTART);
       mqtt.subscribe(MQTT_TOPIC_THRESHOLD);
+      mqtt.subscribe(MQTT_TOPIC_FACTORYRST);
       mqtt.setBufferSize(2000);
       mqtt.loop();
     } else {
@@ -1094,6 +1103,18 @@ void storeNetwork(String ssid, String pswd)
   Serial.print("Device has ");
   Serial.print(aux_num_nets);
   Serial.println(" networks stored in NVM");
+}
+
+//Clear all networks stored in the NVM, force SmartConfig
+void clearNetworks() {
+  Serial.println("Clear all stored networks from NVM");
+  prefs.begin("networks", false);
+  if( prefs.clear() ) {
+    Serial.println("All networks have been erased");
+  } else {
+    Serial.println("Failed to clear WiFi networks");
+  }
+  prefs.end();
 }
 
 //Joins the previous functions, gets the stored networks and compares to the available, if there is a match and connects, return true
