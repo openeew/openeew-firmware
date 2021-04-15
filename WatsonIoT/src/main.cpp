@@ -162,10 +162,12 @@ int  breatheintensity = 1;
 #define LED_SAFE_MODE     7 // Magenta breath
 #define LED_FIRMWARE_DFU  8 // Yellow
 #define LED_ERROR         9 // Red
+#define LED_ORANGE       10 // Orange
 
 // --------------------------------------------------------------------------------------------
 // Buzzer Alarm
-void EarthquakeAlarm();
+bool bStopEarthquakeAlarm = false;
+void EarthquakeAlarm( int );
 void AlarmBuzzer();
 int freq = 4000;
 int channel = 0;
@@ -242,8 +244,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
   } else {
     JsonObject cmdData = jsonMQTTReceiveDoc.as<JsonObject>();
     if ( strcmp(topic, MQTT_TOPIC_ALARM) == 0 ) {
-      // Sound the Buzzer & Blink the LED
-      EarthquakeAlarm();
+      // {Alarm:[true|test|false]}
+      String AlarmType = cmdData["Alarm"].as<String>() ;
+      Serial.println( "Alarm received: " + AlarmType );
+      if ( AlarmType.equalsIgnoreCase("true") ) {
+        // Sound the Buzzer & Blink the LED RED
+        bStopEarthquakeAlarm = false;
+        EarthquakeAlarm( LED_ERROR);
+        bStopEarthquakeAlarm = false;
+      } else if ( AlarmType.equalsIgnoreCase("test") ) {
+        // Sound the Buzzer & Blink the LED ORANGE
+        bStopEarthquakeAlarm = false;
+        EarthquakeAlarm( LED_ORANGE );
+        bStopEarthquakeAlarm = false;
+      }else if ( AlarmType.equalsIgnoreCase("false") ) {
+        bStopEarthquakeAlarm = true;
+      }
     } else if ( strcmp(topic, MQTT_TOPIC_FWCHECK) == 0 ) {
       // Remote message received to check for new firmware
       // If a device is running for many months it might fall behind on the version of the
@@ -1253,6 +1269,10 @@ void NeoPixelStatus( int status ) {
     case LED_FIRMWARE_DFU :
       strip.fill( strip.Color(255,255,0), 0, 3);  // Yellow
       Serial.println("LED_FIRMWARE_DFU - Yellow");
+      break;
+    case LED_ORANGE :
+      strip.fill( strip.Color(255,165,0), 0, 3);  // Red
+      Serial.println("LED_ORANGE - Orange");
       break;
     case LED_ERROR :
       strip.fill( strip.Color(255,0,0), 0, 3);  // Red

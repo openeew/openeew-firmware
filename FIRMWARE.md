@@ -123,18 +123,27 @@ This section describes the various commands that can be sent to the OpenEEW firm
 
 ### ALARM
 
-Tell the firmware to make the device blink the LEDs the color red and bleep a warning of an impending earthquake.
+Tell the firmware to make the device blink the LEDs  and bleep a warning of an impending earthquake.
+- "true" : Blink the LEDs the color RED / bleep warning
+- "test" : Blink the LEDs the color ORANGE / bleep warning
+- "false" : Stop an in-progress Alarm - turn off the LEDs and sound
 
 #### Local MQTT Broker
 
 ```sh
-mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m {Alarm:true}
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m  '{Alarm:"true"}'
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m  '{Alarm:"test"}'
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m  '{Alarm:"false"}'
 ```
 
 #### Watson IoT Platform
 
 ```sh
-mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m {Alarm:true}
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m '{Alarm:"true"}'
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m '{Alarm:"test"}'
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m '{Alarm:"false"}'
 ```
 
 ### SENDACCEL
