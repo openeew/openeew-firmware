@@ -116,6 +116,8 @@ This section describes the various commands that can be sent to the OpenEEW firm
 #define MQTT_TOPIC_FWCHECK    "iot-2/cmd/firmwarecheck/fmt/json"
 #define MQTT_TOPIC_SEND10SEC  "iot-2/cmd/10secondhistory/fmt/json"
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
+#define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
+#define MQTT_TOPIC_THRESHOLD  "iot-2/cmd/threshold/fmt/json"
 ```
 
 ### ALARM
@@ -175,7 +177,7 @@ Use this MQTT topic to change the ADXL355 sampling rate.
 
 - Turn off the Accelerometer:
 
- ```sh
+```sh
  mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/samplerate/fmt/json -m {SampleRate:0} -i cmd:samplerate
 
  mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/samplerate/fmt/json  -m {SampleRate:0}
@@ -187,15 +189,15 @@ Use this MQTT topic to change the ADXL355 sampling rate.
  mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/samplerate/fmt/json -m {SampleRate:31} -i cmd:samplerate
 
  mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/samplerate/fmt/json  -m {SampleRate:31}
- ```
+```
 
 - 125 samples per second (a firehose that eats bandwidth)
 
- ```sh
+```sh
  mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/samplerate/fmt/json -m {SampleRate:125} -i cmd:samplerate
 
  mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/samplerate/fmt/json  -m {SampleRate:125}
- ```
+```
 
 ### FWCHECK
 
@@ -222,6 +224,29 @@ Use this MQTT topic to send 10 seconds of accelerometer history to the cloud.  I
 mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/10secondhistory/fmt/json -m {} -i cmd:send10sec
 
 mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/10secondhistory/fmt/json  -m {}
+```
+
+#### RESTART
+
+Use this MQTT topic to force a restart on a device that has lost its mind.
+
+```sh
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/forcerestart/fmt/json -m {} -i cmd:restart
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/forcerestart/fmt/json  -m {}
+```
+
+### THRESHOLD
+
+Use this MQTT topic to override and dynamically adjust the STA/LTA threshold. 
+Some sensors in noisy environments might be too sensitive and might trigger lots of false positives.
+The regional administrator might use this to remotely change the STA/LTA algorithm threshold to reduce the frequency of detection events.
+The  message `{ThresholdOverride:<double>}` will publish a double to the device.
+
+```sh
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/threshold/fmt/json -m {ThresholdOverride:10.2} -i cmd:threshold
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i a:OrgID:mosquitto -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/threshold/fmt/json -m {ThresholdOverride:10.2}
 ```
 
 ### Python Examples

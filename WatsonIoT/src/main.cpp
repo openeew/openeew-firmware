@@ -34,6 +34,7 @@ static char MQTT_ORGID[7];            // Watson IoT 6 character orgid
 #define MQTT_TOPIC_SEND10SEC  "iot-2/cmd/10secondhistory/fmt/json"
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
 #define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
+#define MQTT_TOPIC_THRESHOLD  "iot-2/cmd/threshold/fmt/json"
 char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
@@ -170,10 +171,29 @@ int resolution = 8;
 int io = 5;
 
 // --------------------------------------------------------------------------------------------
+// STA/LTA Algorithm globals
+bool  bPossibleEarthQuake = false;
+double        thresh  = 4.0;
+double     stalta[3]  = { 0, 0, 0 };
+double     sample[3]  = { 0, 0, 0 };
+double  sampleSUM[3]  = { 0, 0, 0 };
+double      ltSUM[3]  = { 0, 0, 0 };
+double    sample1[3]  = { 0, 0, 0 };
+double LTAsample1[3]  = { 0, 0, 0 };
+double     offset[3]  = { 0, 0, 0 };
+double  sampleABS[3]  = { 0, 0, 0 };
+double    sample1ABS  = 0;
+double LTAsample1ABS  = 0;
+double       stav[3]  = { 0, 0, 0 };
+double       ltav[3]  = { 0, 0, 0 };
+
+
+// --------------------------------------------------------------------------------------------
 void IRAM_ATTR isr_adxl() {
   fifoFull = true;
   //fifoCount++;
 }
+
 
 void StartADXL355() {
   // odr_lpf is a global
@@ -285,6 +305,14 @@ void callback(char* topic, byte* payload, unsigned int length) {
         breathedirection = true;
       }
       jsonMQTTReceiveDoc.clear();
+    } else if ( strcmp(topic, MQTT_TOPIC_THRESHOLD) == 0 ) {
+      // Override the `thresh` global
+      char newthreshmsg[50];
+      snprintf( newthreshmsg, 49, "Previous STA/LTA Shake Threshold : %5.2f", thresh);
+      Serial.println(newthreshmsg);
+      thresh = cmdData["ThresholdOverride"].as<double>();
+      snprintf( newthreshmsg, 49, "Override STA/LTA Shake Threshold : %5.2f", thresh);
+      Serial.println(newthreshmsg);
     } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
       Serial.println("Restarting Device...");
       esp_restart();
@@ -457,6 +485,7 @@ void Connect2MQTTbroker() {
       mqtt.subscribe(MQTT_TOPIC_SEND10SEC);
       mqtt.subscribe(MQTT_TOPIC_SENDACCEL);
       mqtt.subscribe(MQTT_TOPIC_RESTART);
+      mqtt.subscribe(MQTT_TOPIC_THRESHOLD);
       mqtt.setBufferSize(2000);
       mqtt.loop();
     } else {
@@ -796,20 +825,6 @@ void setup() {
   digitalWrite(io, LOW); // turn off buzzer
 }
 
-bool  bPossibleEarthQuake      = false;
-double  thresh          = 3.0;
-double    stalta[3]     = { 0, 0, 0 };
-double    sample[3]     = { 0, 0, 0 };
-double    sampleSUM[3]  = { 0, 0, 0 };
-double        ltSUM[3]  = { 0, 0, 0 };
-double    sample1[3]    = { 0, 0, 0 };
-double LTAsample1[3]    = { 0, 0, 0 };
-double     offset[3]    = { 0, 0, 0 };
-double  sampleABS[3]    = { 0, 0, 0 };
-double sample1ABS       = 0;
-double LTAsample1ABS    = 0;
-double       stav[3]    = { 0, 0, 0 };
-double       ltav[3]    = { 0, 0, 0 };
 
 void loop() {
   mqtt.loop();
