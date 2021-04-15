@@ -668,9 +668,10 @@ void NetworkEvent(WiFiEvent_t event) {
       eth_connected = true;
 
       // Switch the MQTT connection to Ethernet from WiFi (or initially)
-      // Preference the Ethernet wired interence if its available
+      // Preference the Ethernet wired interface if its available
       // Disconnect the MQTT session
       if( mqtt.connected() ){
+        Serial.println("Previously connected to WiFi, try to switch the MQTT connection to Ethernet");
         mqtt.disconnect();
         // No need to call mqtt.setClient(ETH); because ETH is a ETHClient which is not the same class as WiFi client
         // Connect2MQTTbroker(); // The MQTT reconnect will be handled by the main loop()
@@ -681,6 +682,7 @@ void NetworkEvent(WiFiEvent_t event) {
       eth_connected = false;
       // Disconnect the MQTT client
       if( mqtt.connected() ){
+        Serial.println("Previously connected to Ethernet, try to switch the MQTT connection to WiFi");
         mqtt.disconnect();
       }
       break;
