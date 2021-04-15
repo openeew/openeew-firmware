@@ -326,7 +326,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
   semver_t current_version = {};
   semver_t latest_version = {};
-  char VersionCheck[48];
+  char VersionCheck[55];
   bool bFirmwareUpdateRequiredOTA = false;
 
   if (semver_parse(OPENEEW_FIRMWARE_VERSION, &current_version)
@@ -338,13 +338,13 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
   int resolution = semver_compare(latest_version, current_version);
 
   if (resolution == 0) {
-    sprintf(VersionCheck,"Version %s is equal to: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    snprintf(VersionCheck,54,"Version %s is equal to: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
   }
   else if (resolution == -1) {
-    sprintf(VersionCheck,"Version %s is lower than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    snprintf(VersionCheck,54,"Version %s is lower than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
   }
   else {
-    sprintf(VersionCheck,"Version %s is higher than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    snprintf(VersionCheck,54,"Version %s is higher than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
     bFirmwareUpdateRequiredOTA = true;
   }
   Serial.println(VersionCheck);
@@ -450,11 +450,11 @@ bool OpenEEWDeviceActivation() {
       return false;
     } else {
       JsonObject ActivationData = ReceiveDoc.as<JsonObject>();
-      char firmware_latest[10];
+      char firmware_latest[20];  // Hold a version string as long as 10.0.0-alpha.beta
       String firmware_ota_url;
 
       strncpy(MQTT_ORGID, ActivationData["org"], sizeof(MQTT_ORGID) );
-      Serial.print("OpenEEW Device Activation directs MQTT data from this sensor to :");
+      Serial.print("OpenEEW Device Activation directs MQTT data from this sensor to : ");
       Serial.println(MQTT_ORGID);
 
       strncpy(firmware_latest, ActivationData["firmware_latest"], sizeof(firmware_latest) );
@@ -532,7 +532,7 @@ void Send10Seconds2Cloud() {
   for( uint16_t idx=0; idx < StaLtaQue.getCount(); idx++ ) {
     if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
       //char reading[75];
-      //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
+      //snprintf( reading, 74, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
       //Serial.println(reading);
 
       acceleration["x"].add(AccelRecord.x);
@@ -586,7 +586,7 @@ void SendLiveData2Cloud() {
   for( ; idx < StaLtaQue.getCount(); idx++ ) {
     if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
       //char reading[75];
-      //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
+      //snprintf( reading, 74, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
       //Serial.println(reading);
 
       acceleration["x"].add(AccelRecord.x);
@@ -768,8 +768,8 @@ void setup() {
   Serial.println(ETH.macAddress());
 
   // Use the reverse octet Mac Address as the MQTT deviceID
-  //sprintf(deviceID,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
-  sprintf(deviceID,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+  //snprintf(deviceID,12,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+  snprintf(deviceID,12,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
   Serial.println(deviceID);
 
   // Set the time on the ESP32
@@ -784,20 +784,20 @@ void setup() {
 
   // Dynamically build the MQTT Device ID from the Mac Address of this ESP32
   // MQTT_ORGID was retreived by the OpenEEWDeviceActivation() function
-  //sprintf(MQTT_DEVICEID,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
-  sprintf(MQTT_DEVICEID,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+  //snprintf(MQTT_DEVICEID,30,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+  snprintf(MQTT_DEVICEID,30,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
   Serial.println(MQTT_DEVICEID);
 
 #ifdef MQTT_LOCALBROKER
-  sprintf(MQTT_HOST,MQTT_LOCALBROKER);  // Enter the IP address of the MQTT broker on your local subnet
+  snprintf(MQTT_HOST,48,MQTT_LOCALBROKER);  // Enter the IP address of the MQTT broker on your local subnet
 #else
-  sprintf(MQTT_HOST,"%s.messaging.internetofthings.ibmcloud.com",MQTT_ORGID);  // Centrally managed
+  snprintf(MQTT_HOST,48,"%s.messaging.internetofthings.ibmcloud.com",MQTT_ORGID);  // Centrally managed
 
   loadCertificates( &wifiClient );      // Load the Watson IoT messaging.pem CA Cert from SPIFFS
 #endif
 
   char mqttparams[100]; // Allocate a buffer large enough for this string ~95 chars
-  sprintf(mqttparams, "MQTT_USER:%s  MQTT_TOKEN:%s  MQTT_DEVICEID:%s", MQTT_USER, MQTT_TOKEN, MQTT_DEVICEID);
+  snprintf(mqttparams, 99, "MQTT_USER:%s  MQTT_TOKEN:%s  MQTT_DEVICEID:%s", MQTT_USER, MQTT_TOKEN, MQTT_DEVICEID);
   Serial.println(mqttparams);
 
   // Connect to MQTT - IBM Watson IoT Platform
@@ -869,7 +869,7 @@ void loop() {
 
         // Do some STA / LTA math here...
         char mathmsg[65];
-        sprintf(mathmsg, "Calculating STA/LTA from %d accelerometer readings", StaLtaQue.getCount());
+        snprintf(mathmsg, 64, "Calculating STA/LTA from %d accelerometer readings", StaLtaQue.getCount());
         //Serial.println(mathmsg);
         if( StaLtaQue.isFull() ) {
           /////////////////// find offset ////////////////
