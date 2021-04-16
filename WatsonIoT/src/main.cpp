@@ -1179,13 +1179,27 @@ bool startSmartConfig()
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP_STA);
   WiFi.beginSmartConfig();
+  int RouterDownTimeOut = 0;
 
   // Wait for SmartConfig packet from mobile
-  Serial.println("Waiting for SmartConfig.");
+  Serial.print("Waiting for SmartConfig or Router to restart" );
   while( !WiFi.smartConfigDone() || eth_connected ) {
     delay(500);
-    Serial.print(".");
+    Serial.print("Waiting for SmartConfig or WiFi Router to recover (10 minutes ~ 650 ticks): " );
+    Serial.println( RouterDownTimeOut );
     NeoPixelStatus( LED_LISTEN_WIFI );  // blink blue
+    if( RouterDownTimeOut < 650 ) {
+      RouterDownTimeOut++;
+    } else {
+      // Maybe the router was down and this device normally connects to a network.
+      // If there's a power outage in the building and power is restored, the device comes up first/fast.
+      // The wifi router might not yet be available. The device goes into SmartConfig polling mode and never recovers.
+      // Eventually the network router comes up but the device is stuck because its looping here.
+      // A restart 15 minutes later would bring it back to normal.
+      // This could be a common problem in the field. Don't dispatch someone just to power cycle the sensor.
+      Serial.println("Router Recovery? Restart OpenEEW device to retry saved networks");
+      esp_restart();
+    }
   }
 
   for( int i=0;i<4;i++){
