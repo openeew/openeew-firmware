@@ -123,7 +123,7 @@ This section describes the various commands that can be sent to the OpenEEW firm
 
 ### ALARM
 
-Tell the firmware to make the device blink the LEDs  and bleep a warning of an impending earthquake.
+Tell the firmware to make the device blink the LEDs and bleep a warning of an impending earthquake.
 - "true" : Blink the LEDs the color RED / bleep warning
 - "test" : Blink the LEDs the color ORANGE / bleep warning
 - "false" : Stop an in-progress Alarm - turn off the LEDs and sound
@@ -236,7 +236,7 @@ mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/10secondhistory/fmt/json -m {} -i cm
 mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/10secondhistory/fmt/json  -m {}
 ```
 
-#### RESTART
+### RESTART
 
 Use this MQTT topic to force a restart on a device that has lost its mind.
 
@@ -259,13 +259,13 @@ mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/threshold/fmt/json -m {ThresholdOver
 mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i a:OrgID:mosquitto -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/threshold/fmt/json -m {ThresholdOverride:10.2}
 ```
 
-#### FACTORY RESET
+### FACTORY RESET
 
-The OpenEEW dashboard allows you to "Remove your sensor from the OpenEEW network" button. It promises that your sensor will no longer contribute data.
+The OpenEEW dashboard allows you to "Remove your sensor from the OpenEEW network". It promises that your sensor will no longer contribute data.
 This MQTT topic does a "reset to factory defaults".  It remove all WiFi SSID / password from NVM ram and then restarts the device. The device restarts into SmartConfig Provisioning mode.  Once the device is in SmartConfig Provisioning mode, the mobile app can be used to connect it to a different WiFi network and register it again (potentially under a different email address / user)
 
 ```sh
-mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/factoryreset/fmt/json -m {} -i cmd:restart
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/factoryreset/fmt/json -m {} -i cmd:factory
 
 mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/factoryreset/fmt/json  -m {}
 ```
