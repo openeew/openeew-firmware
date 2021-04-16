@@ -795,8 +795,8 @@ void setup() {
   Serial.println(ETH.macAddress());
 
   // Use the reverse octet Mac Address as the MQTT deviceID
-  //snprintf(deviceID,12,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
-  snprintf(deviceID,12,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+  //snprintf(deviceID,13,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+  snprintf(deviceID,13,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
   Serial.println(deviceID);
 
   // Set the time on the ESP32
