@@ -1099,7 +1099,7 @@ void readNetworkStored(int netId)
   Serial.print(_ssid);
   Serial.print(" , ");
   DEBUG_L2(_pswd);  // off by default
-  Serial.println("xxxxxx");
+  Serial.println(_pswd);
 }
 
 //Save a pair of SSID and PSWD to NVM
@@ -1158,7 +1158,7 @@ bool WiFiScanAndConnect()
         WiFi.setSleep(false);
         unsigned long t0 = millis();
 
-        while (WiFi.status() != WL_CONNECTED && (millis() - t0) < CONNECTION_TO) {
+        while (WiFi.status() != WL_CONNECTED && (millis() - t0) < 10000 ) {
           NeoPixelStatus( LED_LISTEN_WIFI ); // blink blue
           delay(1000);
         }
