@@ -387,34 +387,32 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
         if( pemfile ) {
           char *DownloadServerPemChain = nullptr;
           size_t pemSize = pemfile.size();
-          if( pemSize == 0 ) {
-            DownloadServerPemChain = (char *)malloc(pemSize);
-            if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
-              Serial.printf("Reading %s pem server certificate chain failed.\r\n",DOWNLOAD_CERT_PEM_FILE);
+          DownloadServerPemChain = (char *)malloc(pemSize);
+          if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
+            Serial.printf("Reading %s pem server certificate chain failed.\r\n",DOWNLOAD_CERT_PEM_FILE);
+          } else {
+            Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DOWNLOAD_CERT_PEM_FILE);
+            Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
+
+            // Increase the watchdog timer before starting the firmware upgrade
+            // The download and write can trip the watchdog timer and the old firmware
+            // will abort / reset before the new firmware is complete.
+            esp_task_wdt_init(15,0);
+
+            Serial.println("Starting OpenEEW OTA firmware upgrade...");
+            esp_http_client_config_t config = {0};
+            config.url = firmware_ota_url.c_str() ;
+            config.cert_pem = DownloadServerPemChain ;
+            esp_err_t ret = esp_https_ota(&config);
+            if (ret == ESP_OK) {
+                Serial.println("OTA upgrade downloaded. Restarting...");
+                esp_restart();
             } else {
-              Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DOWNLOAD_CERT_PEM_FILE);
-              Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
-
-              // Increase the watchdog timer before starting the firmware upgrade
-              // The download and write can trip the watchdog timer and the old firmware
-              // will abort / reset before the new firmware is complete.
-              esp_task_wdt_init(15,0);
-
-              Serial.println("Starting OpenEEW OTA firmware upgrade...");
-              esp_http_client_config_t config = {0};
-              config.url = firmware_ota_url.c_str() ;
-              config.cert_pem = DownloadServerPemChain ;
-              esp_err_t ret = esp_https_ota(&config);
-              if (ret == ESP_OK) {
-                  Serial.println("OTA upgrade downloaded. Restarting...");
-                  esp_restart();
-              } else {
-                  esp_task_wdt_init(5,0);
-                  Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
-              }
+                esp_task_wdt_init(5,0);
+                Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
             }
-            free( DownloadServerPemChain );
           }
+          free( DownloadServerPemChain );
         } else {
           Serial.println("Failed to open server pem chain.");
         }
