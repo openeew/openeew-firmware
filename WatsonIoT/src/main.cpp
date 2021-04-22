@@ -773,7 +773,7 @@ void setup() {
   Serial.println();
   Serial.println("OpenEEW Sensor Application");
 
-  strip.setBrightness(130);  // Dim the LED to 50% - 0 off, 255 full bright
+  strip.setBrightness(50);  // Dim the LED to 50% - 0 off, 255 full bright
 
   // Start WiFi connection
   WiFi.onEvent(NetworkEvent);
