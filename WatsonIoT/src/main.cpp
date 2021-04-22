@@ -773,7 +773,7 @@ void setup() {
   Serial.println();
   Serial.println("OpenEEW Sensor Application");
 
-  strip.setBrightness(130);  // Dim the LED to 50% - 0 off, 255 full bright
+  strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
 
   // Start WiFi connection
   WiFi.onEvent(NetworkEvent);
@@ -781,12 +781,21 @@ void setup() {
 
   wificonnected = WiFiScanAndConnect();
   if( !wificonnected )  {
-    while( !startSmartConfig() ) {
-      // loop in SmartConfig until the user provides
-      // the correct WiFi SSID and password
+    // If the sensor has been registered in the past
+    // at least one WiFi network will have been stored in NVM
+    // and if the Ethernet cable is connected, do not
+    // loop in SmartConfig, just use the hardwired connection.
+    if( !numNetworksStored() && !eth_connected ) {
+      while( !startSmartConfig() ) {
+        // loop in SmartConfig until the user provides
+        // the correct WiFi SSID and password
+      }
+    } else {
+      Serial.println("Use hardwired Ethernet connection.");
     }
+  } else {
+    Serial.println("WiFi Connected");
   }
-  Serial.println("WiFi Connected");
 
   byte mac[6];                     // the MAC address of your Wifi shield
   WiFi.macAddress(mac);
@@ -1099,7 +1108,7 @@ void readNetworkStored(int netId)
   Serial.print(_ssid);
   Serial.print(" , ");
   DEBUG_L2(_pswd);  // off by default
-  Serial.println(_pswd);
+  Serial.println("xxxxxx");
 }
 
 //Save a pair of SSID and PSWD to NVM
@@ -1158,7 +1167,7 @@ bool WiFiScanAndConnect()
         WiFi.setSleep(false);
         unsigned long t0 = millis();
 
-        while (WiFi.status() != WL_CONNECTED && (millis() - t0) < 10000 ) {
+        while (WiFi.status() != WL_CONNECTED && (millis() - t0) < CONNECTION_TO) {
           NeoPixelStatus( LED_LISTEN_WIFI ); // blink blue
           delay(1000);
         }
@@ -1196,12 +1205,15 @@ bool startSmartConfig()
     NeoPixelStatus( LED_LISTEN_WIFI );  // blink blue
     if( RouterDownTimeOut < 650 ) {
       RouterDownTimeOut++;
+    } else if( !numNetworksStored() ) {
+      // There are no stored WiFi network credentials, keep waiting
+      RouterDownTimeOut = 0;
     } else {
       // Maybe the router was down and this device normally connects to a network.
       // If there's a power outage in the building and power is restored, the device comes up first/fast.
       // The wifi router might not yet be available. The device goes into SmartConfig polling mode and never recovers.
       // Eventually the network router comes up but the device is stuck because its looping here.
-      // A restart 15 minutes later would bring it back to normal.
+      // A restart 10 minutes later would bring it back to normal.
       // This could be a common problem in the field. Don't dispatch someone just to power cycle the sensor.
       Serial.println("Router Recovery? Restart OpenEEW device to retry saved networks");
       esp_restart();
@@ -1215,7 +1227,9 @@ bool startSmartConfig()
 
   if( eth_connected ) {
     // Ethernet cable was connected during or before SmartConfig
+    Serial.println("Skip SmartConfig. Use hardwired Ethernet connection.");
     // Skip SmartConfig
+    WiFi.stopSmartConfig();
     return true;
   }
   Serial.println("SmartConfig received.");
@@ -1241,7 +1255,7 @@ bool startSmartConfig()
     return true;
   }
   else {
-    Serial.println("Something went wrong with SmartConfig");
+    Serial.println("SmartConfig received an incorrect WiFi password.");
     WiFi.stopSmartConfig();
     return false;
   }
@@ -1320,13 +1334,18 @@ void NeoPixelBreathe() {
 
 
 // Sound the Buzzer & Blink the LED
-void EarthquakeAlarm() {
+void EarthquakeAlarm( int AlarmLEDColor ) {
   Serial.println("Earthquake Alarm!");
+  strip.setBrightness(255);       // The breathe intensity might have the brightness low
   for( int i=0;i<10;i++) {
-    delay(500);
-    NeoPixelStatus( LED_ERROR ); // Alarm - blink red
-    AlarmBuzzer();
+    if( !bStopEarthquakeAlarm ) {
+      delay(500);
+      NeoPixelStatus( AlarmLEDColor ); // Alarm - blink red or orange
+      AlarmBuzzer();
+    }
+    mqtt.loop();  // Process any incoming MQTT topics (which might stop the alarm)
   }
+  strip.setBrightness( breatheintensity );  // reset the brightness to the prior intensity
   digitalWrite(io, LOW); // turn off buzzer
 }
 
