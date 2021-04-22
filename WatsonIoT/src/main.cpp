@@ -1334,13 +1334,18 @@ void NeoPixelBreathe() {
 
 
 // Sound the Buzzer & Blink the LED
-void EarthquakeAlarm() {
+void EarthquakeAlarm( int AlarmLEDColor ) {
   Serial.println("Earthquake Alarm!");
+  strip.setBrightness(255);       // The breathe intensity might have the brightness low
   for( int i=0;i<10;i++) {
-    delay(500);
-    NeoPixelStatus( LED_ERROR ); // Alarm - blink red
-    AlarmBuzzer();
+    if( !bStopEarthquakeAlarm ) {
+      delay(500);
+      NeoPixelStatus( AlarmLEDColor ); // Alarm - blink red or orange
+      AlarmBuzzer();
+    }
+    mqtt.loop();  // Process any incoming MQTT topics (which might stop the alarm)
   }
+  strip.setBrightness( breatheintensity );  // reset the brightness to the prior intensity
   digitalWrite(io, LOW); // turn off buzzer
 }
 
