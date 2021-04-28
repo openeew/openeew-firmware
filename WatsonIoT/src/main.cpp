@@ -655,13 +655,13 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_STA_START:     // 2
       Serial.println("ESP32 WiFi started");
+      WiFi.setHostname("openeew-sensor-wifi");
       break;
     case SYSTEM_EVENT_SCAN_DONE:
       Serial.println("Completed scan for access points");
       break;
     case SYSTEM_EVENT_STA_CONNECTED: // 4
       Serial.println("ESP32 WiFi connected to AP");
-      WiFi.setHostname("openeew-sensor-wifi");
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       Serial.println("Disconnected from WiFi access point");
