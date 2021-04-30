@@ -550,13 +550,12 @@ void Send10Seconds2Cloud() {
   // Allocate a ArduinoJson buffer large enough to 10 seconds of Accelerometer trace data
   DynamicJsonDocument historydoc(16384);
   JsonObject payload      = historydoc.to<JsonObject>();
-  JsonObject status       = payload.createNestedObject("d");
-  JsonArray  alltraces    = status.createNestedArray("traces");
+  JsonArray  alltraces    = payload.createNestedArray("traces");
   JsonObject acceleration = alltraces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
-  status["device_id"] = deviceID ;
-  status["device_t"] = time(nullptr);
+  payload["device_id"] = deviceID ;
+  payload["device_t"]  = time(nullptr);
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
@@ -600,13 +599,12 @@ void SendLiveData2Cloud() {
   // DynamicJsonDocument is stored on the heap
   DynamicJsonDocument jsonDoc(3000);
   JsonObject payload      = jsonDoc.to<JsonObject>();
-  JsonObject status       = payload.createNestedObject("d");
-  JsonArray  traces       = status.createNestedArray("traces");
+  JsonArray  traces       = payload.createNestedArray("traces");
   JsonObject acceleration = traces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
-  status["device_id"] = deviceID;
-  status["device_t"] = time(nullptr);
+  payload["device_id"] = deviceID;
+  payload["device_t"]  = time(nullptr);
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
