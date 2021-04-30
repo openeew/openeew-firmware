@@ -605,6 +605,7 @@ void SendLiveData2Cloud() {
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   status["device_id"] = deviceID;
+  status["device_t"] = time(nullptr);
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
