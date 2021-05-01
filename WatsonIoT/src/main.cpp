@@ -42,7 +42,7 @@ char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
 // If an OTA firmware upgrade is required, the binary is downloaded from a secure server
-//#define DOWNLOAD_CERT_PEM_FILE   "/mybluemix-net-chain.pem"
+#define BLUEMIX_CERT_PEM_FILE      "/mybluemix-net-chain.pem"
 //#define DOWNLOAD_CERT_PEM_FILE   "/github-com-chain.pem"
 #define DOWNLOAD_CERT_PEM_FILE     "/openeew-com-chain.pem"
 #define WATSON_IOT_PLATFORM_CA_PEM "/messaging.pem"
@@ -62,6 +62,7 @@ PubSubClient mqtt(MQTT_HOST, MQTT_PORT, callback, wifiClient);
 
 // Activation
 bool OpenEEWDeviceActivation();
+bool LegacyFirmwareVersionCheck( char *, String );
 bool FirmwareVersionCheck( char *, String );
 void SetTimeESP32();
 void SendLiveData2Cloud();
@@ -356,6 +357,95 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 
+
+bool LegacyFirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
+  semver_t current_version = {};
+  semver_t latest_version = {};
+  char VersionCheck[55];
+  bool bFirmwareUpdateRequiredOTA = false;
+
+  if (semver_parse(OPENEEW_FIRMWARE_VERSION, &current_version)
+    || semver_parse(firmware_latest, &latest_version)) {
+    Serial.println("Invalid semver string");
+    return false;
+  }
+
+  int resolution = semver_compare(latest_version, current_version);
+
+  if (resolution == 0) {
+    snprintf(VersionCheck,54,"Version %s is equal to: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+  }
+  else if (resolution == -1) {
+    snprintf(VersionCheck,54,"Version %s is lower than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+  }
+  else {
+    snprintf(VersionCheck,54,"Version %s is higher than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    bFirmwareUpdateRequiredOTA = true;
+  }
+  Serial.println(VersionCheck);
+
+  if( bFirmwareUpdateRequiredOTA ) {
+    // OTA upgrade is required
+    Serial.println("An OTA upgrade is required. Download the new OpenEEW firmware :");
+    Serial.println(firmware_ota_url);
+    // Launch an OTA upgrade
+    NeoPixelStatus( LED_FIRMWARE_OTA ); // blink magenta
+
+    if( SPIFFS.begin(false) ) {
+      Serial.printf("Opening Server PEM Chain : %s\r\n", BLUEMIX_CERT_PEM_FILE);
+      if( SPIFFS.exists( BLUEMIX_CERT_PEM_FILE )) {
+        File pemfile = SPIFFS.open( BLUEMIX_CERT_PEM_FILE );
+        if( pemfile ) {
+          char *DownloadServerPemChain = nullptr;
+          size_t pemSize = pemfile.size();
+          DownloadServerPemChain = (char *)malloc(pemSize);
+          if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
+            Serial.printf("Reading %s pem server certificate chain failed.\r\n",BLUEMIX_CERT_PEM_FILE);
+          } else {
+            Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",BLUEMIX_CERT_PEM_FILE);
+            Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
+
+            // Increase the watchdog timer before starting the firmware upgrade
+            // The download and write can trip the watchdog timer and the old firmware
+            // will abort / reset before the new firmware is complete.
+            esp_task_wdt_init(15,0);
+            NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+            WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
+            Serial.println("Starting OpenEEW OTA firmware upgrade...");
+            esp_http_client_config_t config = {0};
+            config.url = firmware_ota_url.c_str() ;
+            config.cert_pem = DownloadServerPemChain ;
+            esp_err_t ret = esp_https_ota(&config);
+            if (ret == ESP_OK) {
+                Serial.println("OTA upgrade downloaded. Restarting...");
+                WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
+                esp_restart();
+            } else {
+                esp_task_wdt_init(5,0);
+                Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
+            }
+          }
+          free( DownloadServerPemChain );
+        } else {
+          Serial.println("Failed to open server pem chain.");
+        }
+        pemfile.close();
+      } else {
+        Serial.printf("The %s pem server certificate file does not exist.\r\n",BLUEMIX_CERT_PEM_FILE);
+        Serial.println("The SPIFFS filesystem might be empty.");
+      }
+    } else {
+      Serial.println("An error has occurred while mounting SPIFFS");
+    }
+  }
+  // Free allocated memory when we're done
+  semver_free(&current_version);
+  semver_free(&latest_version);
+  return true;
+}
+
+
 bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
   semver_t current_version = {};
   semver_t latest_version = {};
@@ -407,6 +497,8 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
             // The download and write can trip the watchdog timer and the old firmware
             // will abort / reset before the new firmware is complete.
             esp_task_wdt_init(15,0);
+            NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+            WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
 
             Serial.println("Starting OpenEEW OTA firmware upgrade...");
             esp_http_client_config_t config = {0};
@@ -415,6 +507,7 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
             esp_err_t ret = esp_https_ota(&config);
             if (ret == ESP_OK) {
                 Serial.println("OTA upgrade downloaded. Restarting...");
+                WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
                 esp_restart();
             } else {
                 esp_task_wdt_init(5,0);
@@ -443,9 +536,9 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
 
 // Call the OpenEEW Device Activation endpoint to retrieve MQTT OrgID
 bool OpenEEWDeviceActivation() {
-  // OPENEEW_ACTIVATION_ENDPOINT "https://openeew-earthquakes.mybluemix.net/activation?ver=1"
-  // $ curl -i  -X POST -d '{"macaddress":"112233445566","lat":40,"lng":-74,"firmware_device":"1.0.0"}'
-  //    -H "Content-type: application/JSON" https://openeew-earthquakes.mybluemix.net/activation?ver=1
+  // OPENEEW_ACTIVATION_ENDPOINT "https://device-mgmt.openeew.com/activation?ver=1"
+  // $ curl -i  -X POST -d '{"macaddress":"112233445566","firmware_device":"1.0.0"}'
+  //    -H "Content-type: application/JSON" https://device-mgmt.openeew.com/activation?ver=1
   Serial.println("Contacting the OpenEEW Device Activation Endpoint :");
   Serial.println(OPENEEW_ACTIVATION_ENDPOINT);
 
@@ -496,7 +589,11 @@ bool OpenEEWDeviceActivation() {
 
       strncpy(firmware_latest, ActivationData["firmware_latest"], sizeof(firmware_latest) );
       firmware_ota_url = ActivationData["firmware_ota_url"].as<String>();
-      FirmwareVersionCheck(firmware_latest, firmware_ota_url);
+      if( firmware_ota_url.indexOf("mybluemix.net") >=0 ) {
+        LegacyFirmwareVersionCheck(firmware_latest, firmware_ota_url);
+      } else {
+        FirmwareVersionCheck(firmware_latest, firmware_ota_url);
+      }
     }
     return true ;
   } else {        // Failed to successfully contact endpoint
