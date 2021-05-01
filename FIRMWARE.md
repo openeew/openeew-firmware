@@ -116,22 +116,34 @@ This section describes the various commands that can be sent to the OpenEEW firm
 #define MQTT_TOPIC_FWCHECK    "iot-2/cmd/firmwarecheck/fmt/json"
 #define MQTT_TOPIC_SEND10SEC  "iot-2/cmd/10secondhistory/fmt/json"
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
+#define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
+#define MQTT_TOPIC_THRESHOLD  "iot-2/cmd/threshold/fmt/json"
+#define MQTT_TOPIC_FACTORYRST "iot-2/cmd/factoryreset/fmt/json"
 ```
 
 ### ALARM
 
-Tell the firmware to make the device blink the LEDs the color red and bleep a warning of an impending earthquake.
+Tell the firmware to make the device blink the LEDs and bleep a warning of an impending earthquake.
+- "true" : Blink the LEDs the color RED / bleep warning
+- "test" : Blink the LEDs the color ORANGE / bleep warning
+- "false" : Stop an in-progress Alarm - turn off the LEDs and sound
 
 #### Local MQTT Broker
 
 ```sh
-mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m {Alarm:true}
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m  '{Alarm:"true"}'
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m  '{Alarm:"test"}'
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/earthquake/fmt/json -i cmd:earthquake -m  '{Alarm:"false"}'
 ```
 
 #### Watson IoT Platform
 
 ```sh
-mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m {Alarm:true}
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m '{Alarm:"true"}'
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m '{Alarm:"test"}'
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/earthquake/fmt/json  -m '{Alarm:"false"}'
 ```
 
 ### SENDACCEL
@@ -175,7 +187,7 @@ Use this MQTT topic to change the ADXL355 sampling rate.
 
 - Turn off the Accelerometer:
 
- ```sh
+```sh
  mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/samplerate/fmt/json -m {SampleRate:0} -i cmd:samplerate
 
  mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/samplerate/fmt/json  -m {SampleRate:0}
@@ -187,15 +199,15 @@ Use this MQTT topic to change the ADXL355 sampling rate.
  mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/samplerate/fmt/json -m {SampleRate:31} -i cmd:samplerate
 
  mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/samplerate/fmt/json  -m {SampleRate:31}
- ```
+```
 
 - 125 samples per second (a firehose that eats bandwidth)
 
- ```sh
+```sh
  mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/samplerate/fmt/json -m {SampleRate:125} -i cmd:samplerate
 
  mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/samplerate/fmt/json  -m {SampleRate:125}
- ```
+```
 
 ### FWCHECK
 
@@ -222,6 +234,40 @@ Use this MQTT topic to send 10 seconds of accelerometer history to the cloud.  I
 mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/10secondhistory/fmt/json -m {} -i cmd:send10sec
 
 mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/10secondhistory/fmt/json  -m {}
+```
+
+### RESTART
+
+Use this MQTT topic to force a restart on a device that has lost its mind.
+
+```sh
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/forcerestart/fmt/json -m {} -i cmd:restart
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/forcerestart/fmt/json  -m {}
+```
+
+### THRESHOLD
+
+Use this MQTT topic to override and dynamically adjust the STA/LTA threshold. 
+Some sensors in noisy environments might be too sensitive and might trigger lots of false positives.
+The regional administrator might use this to remotely change the STA/LTA algorithm threshold to reduce the frequency of detection events.
+The  message `{ThresholdOverride:<double>}` will publish a double to the device.
+
+```sh
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/threshold/fmt/json -m {ThresholdOverride:10.2} -i cmd:threshold
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i a:OrgID:mosquitto -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/threshold/fmt/json -m {ThresholdOverride:10.2}
+```
+
+### FACTORY RESET
+
+The OpenEEW dashboard allows you to "Remove your sensor from the OpenEEW network". It promises that your sensor will no longer contribute data.
+This MQTT topic does a "reset to factory defaults".  It remove all WiFi SSID / password from NVM ram and then restarts the device. The device restarts into SmartConfig Provisioning mode.  Once the device is in SmartConfig Provisioning mode, the mobile app can be used to connect it to a different WiFi network and register it again (potentially under a different email address / user)
+
+```sh
+mosquitto_pub -h 192.168.1.101 -t iot-2/cmd/factoryreset/fmt/json -m {} -i cmd:factory
+
+mosquitto_pub -h OrgID.messaging.internetofthings.ibmcloud.com -p 8883 --cafile messaging.pem -u $WIOTP_APIKEY -P $WIOTP_TOKEN -i "a:OrgID:mosquitto" -t iot-2/type/OpenEEW/id/A8032A4DD5F0/cmd/factoryreset/fmt/json  -m {}
 ```
 
 ### Python Examples

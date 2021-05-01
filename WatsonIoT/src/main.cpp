@@ -6,25 +6,16 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <HTTPClient.h>
-#include <Adxl355.h>  // forked from https://github.com/markrad/esp32-ADXL355
+#include <Adxl355.h>            // forked from https://github.com/markrad/esp32-ADXL355
 #include <math.h>
 #include <esp_https_ota.h>
 #include <esp_task_wdt.h>
 #include <SPIFFS.h>
 #include "config.h"
-#include "semver.h"  // from https://github.com/h2non/semver.c
+#include "semver.h"             // from https://github.com/h2non/semver.c
 #include <cppQueue.h>
-
-// --------------------------------------------------------------------------------------------
-//        UPDATE CONFIGURATION TO MATCH YOUR ENVIRONMENT
-// --------------------------------------------------------------------------------------------
-//#define OPENEEW_ACTIVATION_ENDPOINT "https://openeew-devicemgmt.mybluemix.net/activation?ver=1"
-#define OPENEEW_ACTIVATION_ENDPOINT "https://device-mgmt.openeew.com/activation?ver=1"
-#define OPENEEW_FIRMWARE_VERSION    "1.4.0"
-
-// Run this firmware with a MQTT Broker on a local subnet
-// Comment this Define to send data to the Cloud
-//#define MQTT_LOCALBROKER "192.168.1.101"
+#include "soc/soc.h"            // Enable/Disable BrownOut detection
+#include "soc/rtc_cntl_reg.h"
 
 // Watson IoT connection details
 static char MQTT_HOST[48];            // ORGID.messaging.internetofthings.ibmcloud.com
@@ -44,12 +35,16 @@ static char MQTT_ORGID[7];            // Watson IoT 6 character orgid
 #define MQTT_TOPIC_FWCHECK    "iot-2/cmd/firmwarecheck/fmt/json"
 #define MQTT_TOPIC_SEND10SEC  "iot-2/cmd/10secondhistory/fmt/json"
 #define MQTT_TOPIC_SENDACCEL  "iot-2/cmd/sendacceldata/fmt/json"
+#define MQTT_TOPIC_RESTART    "iot-2/cmd/forcerestart/fmt/json"
+#define MQTT_TOPIC_THRESHOLD  "iot-2/cmd/threshold/fmt/json"
+#define MQTT_TOPIC_FACTORYRST "iot-2/cmd/factoryreset/fmt/json"
 char deviceID[13];
 
 // Store the Download Server PEM and Digicert CA and Root CA in SPIFFS
 // If an OTA firmware upgrade is required, the binary is downloaded from a secure server
-#define DOWNLOAD_CERT_PEM_FILE     "/mybluemix-net-chain.pem"
+#define BLUEMIX_CERT_PEM_FILE      "/mybluemix-net-chain.pem"
 //#define DOWNLOAD_CERT_PEM_FILE   "/github-com-chain.pem"
+#define DOWNLOAD_CERT_PEM_FILE     "/openeew-com-chain.pem"
 #define WATSON_IOT_PLATFORM_CA_PEM "/messaging.pem"
 
 // Timezone info
@@ -67,6 +62,7 @@ PubSubClient mqtt(MQTT_HOST, MQTT_PORT, callback, wifiClient);
 
 // Activation
 bool OpenEEWDeviceActivation();
+bool LegacyFirmwareVersionCheck( char *, String );
 bool FirmwareVersionCheck( char *, String );
 void SetTimeESP32();
 void SendLiveData2Cloud();
@@ -97,8 +93,10 @@ Preferences prefs;
 String _ssid;    // your network SSID (name) - loaded from NVM
 String _pswd;    // your network password    - loaded from NVM
 int networksStored;
-static bool eth_connected = false;
-static bool wificonnected = false;
+static bool bEthConnected  = false;
+static bool bEthConnecting = false;
+static bool bWiFiConnected  = false;
+static bool bNetworkInterfaceChanged = false;
 
 // --------------------------------------------------------------------------------------------
 // ADXL Accelerometer
@@ -127,11 +125,6 @@ int QUE_len = LTA_len + STA_len;
 
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
-DynamicJsonDocument jsonDoc(4000);
-DynamicJsonDocument jsonTraces(4000);
-JsonArray traces = jsonTraces.to<JsonArray>();
-static char msg[2000];
-
 // 10 second FIFO queue for STA / LTA algorithm
 typedef struct AccelXYZ {
   double x; double y; double z;
@@ -145,6 +138,7 @@ int  numScannedNetworks();
 int  numNetworksStored();
 void readNetworkStored(int netId);
 void storeNetwork(String ssid, String pswd);
+void clearNetworks();
 bool WiFiScanAndConnect();
 bool startSmartConfig();
 
@@ -173,10 +167,12 @@ int  breatheintensity = 1;
 #define LED_SAFE_MODE     7 // Magenta breath
 #define LED_FIRMWARE_DFU  8 // Yellow
 #define LED_ERROR         9 // Red
+#define LED_ORANGE       10 // Orange
 
 // --------------------------------------------------------------------------------------------
 // Buzzer Alarm
-void EarthquakeAlarm();
+bool bStopEarthquakeAlarm = false;
+void EarthquakeAlarm( int );
 void AlarmBuzzer();
 int freq = 4000;
 int channel = 0;
@@ -184,15 +180,38 @@ int resolution = 8;
 int io = 5;
 
 // --------------------------------------------------------------------------------------------
+// STA/LTA Algorithm globals
+bool  bPossibleEarthQuake = false;
+double        thresh  = 4.0;
+double     stalta[3]  = { 0, 0, 0 };
+double     sample[3]  = { 0, 0, 0 };
+double  sampleSUM[3]  = { 0, 0, 0 };
+double      ltSUM[3]  = { 0, 0, 0 };
+double    sample1[3]  = { 0, 0, 0 };
+double LTAsample1[3]  = { 0, 0, 0 };
+double     offset[3]  = { 0, 0, 0 };
+double  sampleABS[3]  = { 0, 0, 0 };
+double    sample1ABS  = 0;
+double LTAsample1ABS  = 0;
+double       stav[3]  = { 0, 0, 0 };
+double       ltav[3]  = { 0, 0, 0 };
+
+
+// --------------------------------------------------------------------------------------------
 void IRAM_ATTR isr_adxl() {
   fifoFull = true;
   //fifoCount++;
 }
 
+
 void StartADXL355() {
   // odr_lpf is a global
   adxl355.start();
   delay(1000);
+
+  // Calibrating the ADXL355 can cause brownouts
+  NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
 
   if (adxl355.isDeviceRecognized()) {
     Serial.println("Initializing sensor");
@@ -215,6 +234,7 @@ void StartADXL355() {
     Serial.println("Unable to get accelerometer");
   }
   Serial.println("Finished accelerometer configuration");
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
 }
 
 
@@ -234,8 +254,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
   } else {
     JsonObject cmdData = jsonMQTTReceiveDoc.as<JsonObject>();
     if ( strcmp(topic, MQTT_TOPIC_ALARM) == 0 ) {
-      // Sound the Buzzer & Blink the LED
-      EarthquakeAlarm();
+      // {Alarm:[true|test|false]}
+      String AlarmType = cmdData["Alarm"].as<String>() ;
+      Serial.println( "Alarm received: " + AlarmType );
+      if ( AlarmType.equalsIgnoreCase("true") ) {
+        // Sound the Buzzer & Blink the LED RED
+        bStopEarthquakeAlarm = false;
+        EarthquakeAlarm( LED_ERROR);
+        bStopEarthquakeAlarm = false;
+      } else if ( AlarmType.equalsIgnoreCase("test") ) {
+        // Sound the Buzzer & Blink the LED ORANGE
+        bStopEarthquakeAlarm = false;
+        EarthquakeAlarm( LED_ORANGE );
+        bStopEarthquakeAlarm = false;
+      }else if ( AlarmType.equalsIgnoreCase("false") ) {
+        bStopEarthquakeAlarm = true;
+      }
     } else if ( strcmp(topic, MQTT_TOPIC_FWCHECK) == 0 ) {
       // Remote message received to check for new firmware
       // If a device is running for many months it might fall behind on the version of the
@@ -299,6 +333,23 @@ void callback(char* topic, byte* payload, unsigned int length) {
         breathedirection = true;
       }
       jsonMQTTReceiveDoc.clear();
+    } else if ( strcmp(topic, MQTT_TOPIC_THRESHOLD) == 0 ) {
+      // Override the `thresh` global
+      char newthreshmsg[50];
+      snprintf( newthreshmsg, 49, "Previous STA/LTA Shake Threshold : %5.2f", thresh);
+      Serial.println(newthreshmsg);
+      thresh = cmdData["ThresholdOverride"].as<double>();
+      snprintf( newthreshmsg, 49, "Override STA/LTA Shake Threshold : %5.2f", thresh);
+      Serial.println(newthreshmsg);
+    } else if ( strcmp(topic, MQTT_TOPIC_FACTORYRST) == 0 ) {
+      // Remote message received to factory reset the device
+      Serial.println("Remote message received to factory reset the device.");
+      clearNetworks();
+      Serial.println("Restarting Device...");
+      esp_restart();
+    } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
+      Serial.println("Restarting Device...");
+      esp_restart();
     } else {
       Serial.println("Unknown command received");
     }
@@ -306,10 +357,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 
-bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
+
+bool LegacyFirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
   semver_t current_version = {};
   semver_t latest_version = {};
-  char VersionCheck[48];
+  char VersionCheck[55];
   bool bFirmwareUpdateRequiredOTA = false;
 
   if (semver_parse(OPENEEW_FIRMWARE_VERSION, &current_version)
@@ -321,13 +373,13 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
   int resolution = semver_compare(latest_version, current_version);
 
   if (resolution == 0) {
-    sprintf(VersionCheck,"Version %s is equal to: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    snprintf(VersionCheck,54,"Version %s is equal to: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
   }
   else if (resolution == -1) {
-    sprintf(VersionCheck,"Version %s is lower than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    snprintf(VersionCheck,54,"Version %s is lower than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
   }
   else {
-    sprintf(VersionCheck,"Version %s is higher than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    snprintf(VersionCheck,54,"Version %s is higher than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
     bFirmwareUpdateRequiredOTA = true;
   }
   Serial.println(VersionCheck);
@@ -339,43 +391,50 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
     // Launch an OTA upgrade
     NeoPixelStatus( LED_FIRMWARE_OTA ); // blink magenta
 
-    if( SPIFFS.begin(true) ) {
-      Serial.printf("Opening Server PEM Chain : %s\r\n", DOWNLOAD_CERT_PEM_FILE);
-      File pemfile = SPIFFS.open( DOWNLOAD_CERT_PEM_FILE );
-      if( pemfile ) {
-        char *DownloadServerPemChain = nullptr;
-        size_t pemSize = pemfile.size();
-        DownloadServerPemChain = (char *)malloc(pemSize);
-
-        if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
-          Serial.printf("Reading %s pem server certificate chain failed.\r\n",DOWNLOAD_CERT_PEM_FILE);
-        } else {
-          Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DOWNLOAD_CERT_PEM_FILE);
-          //Serial.println( DownloadServerPemChain );
-
-          // Increase the watchdog timer before starting the firmware upgrade
-          // The download and write can trip the watchdog timer and the old firmware
-          // will abort / reset before the new firmware is complete.
-          esp_task_wdt_init(15,0);
-
-          Serial.println("Starting OpenEEW OTA firmware upgrade...");
-          esp_http_client_config_t config = {0};
-          config.url = firmware_ota_url.c_str() ;
-          config.cert_pem = DownloadServerPemChain ;
-          esp_err_t ret = esp_https_ota(&config);
-          if (ret == ESP_OK) {
-              Serial.println("OTA upgrade downloaded. Restarting...");
-              esp_restart();
+    if( SPIFFS.begin(false) ) {
+      Serial.printf("Opening Server PEM Chain : %s\r\n", BLUEMIX_CERT_PEM_FILE);
+      if( SPIFFS.exists( BLUEMIX_CERT_PEM_FILE )) {
+        File pemfile = SPIFFS.open( BLUEMIX_CERT_PEM_FILE );
+        if( pemfile ) {
+          char *DownloadServerPemChain = nullptr;
+          size_t pemSize = pemfile.size();
+          DownloadServerPemChain = (char *)malloc(pemSize);
+          if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
+            Serial.printf("Reading %s pem server certificate chain failed.\r\n",BLUEMIX_CERT_PEM_FILE);
           } else {
-              esp_task_wdt_init(5,0);
-              Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
+            Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",BLUEMIX_CERT_PEM_FILE);
+            Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
+
+            // Increase the watchdog timer before starting the firmware upgrade
+            // The download and write can trip the watchdog timer and the old firmware
+            // will abort / reset before the new firmware is complete.
+            esp_task_wdt_init(15,0);
+            NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+            WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
+            Serial.println("Starting OpenEEW OTA firmware upgrade...");
+            esp_http_client_config_t config = {0};
+            config.url = firmware_ota_url.c_str() ;
+            config.cert_pem = DownloadServerPemChain ;
+            esp_err_t ret = esp_https_ota(&config);
+            if (ret == ESP_OK) {
+                Serial.println("OTA upgrade downloaded. Restarting...");
+                WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
+                esp_restart();
+            } else {
+                esp_task_wdt_init(5,0);
+                Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
+            }
           }
-        }
-        free( DownloadServerPemChain );
-      } else {
+          free( DownloadServerPemChain );
+        } else {
           Serial.println("Failed to open server pem chain.");
+        }
+        pemfile.close();
+      } else {
+        Serial.printf("The %s pem server certificate file does not exist.\r\n",BLUEMIX_CERT_PEM_FILE);
+        Serial.println("The SPIFFS filesystem might be empty.");
       }
-      pemfile.close();
     } else {
       Serial.println("An error has occurred while mounting SPIFFS");
     }
@@ -387,50 +446,102 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
 }
 
 
-void GetGeoCoordinates( float *, float *);
-void GetGeoCoordinates( float *latitude, float *longitude) {
-  HTTPClient http;
-  #define GEOCOORD_APIKEY "9f0acd1eb4c51704c2f4429be20ba4c6"
-  http.begin( "http://api.ipstack.com/check?access_key=9f0acd1eb4c51704c2f4429be20ba4c6" );
-  int httpResponseCode = http.GET();
-  Serial.print("GetGeoCoordinates() ipstack HTTP Response code: ");
-  Serial.println(httpResponseCode);
-  String payload = http.getString();
-  http.end();  // free resources
-  Serial.print("ipstack HTTP get response payload: ");
-  Serial.println( payload );
+bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
+  semver_t current_version = {};
+  semver_t latest_version = {};
+  char VersionCheck[55];
+  bool bFirmwareUpdateRequiredOTA = false;
 
-  if( httpResponseCode == 200 ) {  // Success
-    DynamicJsonDocument ReceiveDoc(900);
-    DeserializationError err = deserializeJson(ReceiveDoc, payload);
-    if (err) {
-      Serial.print(F("deserializeJson() failed with code : "));
-      Serial.println(err.c_str());
+  if (semver_parse(OPENEEW_FIRMWARE_VERSION, &current_version)
+    || semver_parse(firmware_latest, &latest_version)) {
+    Serial.println("Invalid semver string");
+    return false;
+  }
+
+  int resolution = semver_compare(latest_version, current_version);
+
+  if (resolution == 0) {
+    snprintf(VersionCheck,54,"Version %s is equal to: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+  }
+  else if (resolution == -1) {
+    snprintf(VersionCheck,54,"Version %s is lower than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+  }
+  else {
+    snprintf(VersionCheck,54,"Version %s is higher than: %s", firmware_latest, OPENEEW_FIRMWARE_VERSION);
+    bFirmwareUpdateRequiredOTA = true;
+  }
+  Serial.println(VersionCheck);
+
+  if( bFirmwareUpdateRequiredOTA ) {
+    // OTA upgrade is required
+    Serial.println("An OTA upgrade is required. Download the new OpenEEW firmware :");
+    Serial.println(firmware_ota_url);
+    // Launch an OTA upgrade
+    NeoPixelStatus( LED_FIRMWARE_OTA ); // blink magenta
+
+    if( SPIFFS.begin(false) ) {
+      Serial.printf("Opening Server PEM Chain : %s\r\n", DOWNLOAD_CERT_PEM_FILE);
+      if( SPIFFS.exists( DOWNLOAD_CERT_PEM_FILE )) {
+        File pemfile = SPIFFS.open( DOWNLOAD_CERT_PEM_FILE );
+        if( pemfile ) {
+          char *DownloadServerPemChain = nullptr;
+          size_t pemSize = pemfile.size();
+          DownloadServerPemChain = (char *)malloc(pemSize);
+          if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
+            Serial.printf("Reading %s pem server certificate chain failed.\r\n",DOWNLOAD_CERT_PEM_FILE);
+          } else {
+            Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DOWNLOAD_CERT_PEM_FILE);
+            Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
+
+            // Increase the watchdog timer before starting the firmware upgrade
+            // The download and write can trip the watchdog timer and the old firmware
+            // will abort / reset before the new firmware is complete.
+            esp_task_wdt_init(15,0);
+            NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+            WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
+            Serial.println("Starting OpenEEW OTA firmware upgrade...");
+            esp_http_client_config_t config = {0};
+            config.url = firmware_ota_url.c_str() ;
+            config.cert_pem = DownloadServerPemChain ;
+            esp_err_t ret = esp_https_ota(&config);
+            if (ret == ESP_OK) {
+                Serial.println("OTA upgrade downloaded. Restarting...");
+                WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
+                esp_restart();
+            } else {
+                esp_task_wdt_init(5,0);
+                Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
+            }
+          }
+          free( DownloadServerPemChain );
+        } else {
+          Serial.println("Failed to open server pem chain.");
+        }
+        pemfile.close();
+      } else {
+        Serial.printf("The %s pem server certificate file does not exist.\r\n",DOWNLOAD_CERT_PEM_FILE);
+        Serial.println("The SPIFFS filesystem might be empty.");
+      }
     } else {
-      JsonObject GeoCoordData =  ReceiveDoc.as<JsonObject>();
-      *latitude  = GeoCoordData["latitude"];
-      *longitude = GeoCoordData["longitude"];
+      Serial.println("An error has occurred while mounting SPIFFS");
     }
   }
+  // Free allocated memory when we're done
+  semver_free(&current_version);
+  semver_free(&latest_version);
+  return true;
 }
 
 
 // Call the OpenEEW Device Activation endpoint to retrieve MQTT OrgID
 bool OpenEEWDeviceActivation() {
-  // OPENEEW_ACTIVATION_ENDPOINT "https://openeew-earthquakes.mybluemix.net/activation?ver=1"
-  // $ curl -i  -X POST -d '{"macaddress":"112233445566","lat":40,"lng":-74,"firmware_device":"1.0.0"}'
-  //    -H "Content-type: application/JSON" https://openeew-earthquakes.mybluemix.net/activation?ver=1
+  // OPENEEW_ACTIVATION_ENDPOINT "https://device-mgmt.openeew.com/activation?ver=1"
+  // $ curl -i  -X POST -d '{"macaddress":"112233445566","firmware_device":"1.0.0"}'
+  //    -H "Content-type: application/JSON" https://device-mgmt.openeew.com/activation?ver=1
   Serial.println("Contacting the OpenEEW Device Activation Endpoint :");
   Serial.println(OPENEEW_ACTIVATION_ENDPOINT);
 
-/*
-  float lat, lng ;
-  GetGeoCoordinates( &lat, &lng );
-  Serial.print("GetGeoCoordinates() reported latitude,longitude : ");
-  Serial.print(lat,5);
-  Serial.print(",");
-  Serial.println(lng,5);
-*/
   HTTPClient http;
   // Domain name with URL path or IP address with path
   http.begin( OPENEEW_ACTIVATION_ENDPOINT );
@@ -442,9 +553,7 @@ bool OpenEEWDeviceActivation() {
   // '{"macaddress":"112233445566","lat":40.00000,"lng":-74.00000,"firmware_device":"1.0.0"}'
   DynamicJsonDocument httpSendDoc(120);
   String httpRequestData;
-  httpSendDoc["macaddress"] = deviceID;
-  //httpSendDoc["lat"] = lat;
-  //httpSendDoc["lng"] = lng;
+  httpSendDoc["macaddress"]      = deviceID;
   httpSendDoc["firmware_device"] = OPENEEW_FIRMWARE_VERSION;
   // Serialize the entire string to be transmitted
   serializeJson(httpSendDoc, httpRequestData);
@@ -471,16 +580,20 @@ bool OpenEEWDeviceActivation() {
       return false;
     } else {
       JsonObject ActivationData = ReceiveDoc.as<JsonObject>();
-      char firmware_latest[10];
+      char firmware_latest[20];  // Hold a version string as long as 10.0.0-alpha.beta
       String firmware_ota_url;
 
       strncpy(MQTT_ORGID, ActivationData["org"], sizeof(MQTT_ORGID) );
-      Serial.print("OpenEEW Device Activation directs MQTT data from this sensor to :");
+      Serial.print("OpenEEW Device Activation directs MQTT data from this sensor to : ");
       Serial.println(MQTT_ORGID);
 
       strncpy(firmware_latest, ActivationData["firmware_latest"], sizeof(firmware_latest) );
       firmware_ota_url = ActivationData["firmware_ota_url"].as<String>();
-      FirmwareVersionCheck(firmware_latest, firmware_ota_url);
+      if( firmware_ota_url.indexOf("mybluemix.net") >=0 ) {
+        LegacyFirmwareVersionCheck(firmware_latest, firmware_ota_url);
+      } else {
+        FirmwareVersionCheck(firmware_latest, firmware_ota_url);
+      }
     }
     return true ;
   } else {        // Failed to successfully contact endpoint
@@ -492,6 +605,10 @@ bool OpenEEWDeviceActivation() {
 
 
 void Connect2MQTTbroker() {
+  if( bNetworkInterfaceChanged ) {
+    mqtt.disconnect();
+    bNetworkInterfaceChanged = false;
+  }
   while (!mqtt.connected()) {
     Serial.print("Attempting MQTT connection...");
     NeoPixelStatus( LED_CONNECT_CLOUD ); // blink cyan
@@ -505,6 +622,9 @@ void Connect2MQTTbroker() {
       mqtt.subscribe(MQTT_TOPIC_FWCHECK);
       mqtt.subscribe(MQTT_TOPIC_SEND10SEC);
       mqtt.subscribe(MQTT_TOPIC_SENDACCEL);
+      mqtt.subscribe(MQTT_TOPIC_RESTART);
+      mqtt.subscribe(MQTT_TOPIC_THRESHOLD);
+      mqtt.subscribe(MQTT_TOPIC_FACTORYRST);
       mqtt.setBufferSize(2000);
       mqtt.loop();
     } else {
@@ -520,6 +640,8 @@ template<typename L> void loadFromFile(const char* fname, L&& load) {
     File f = SPIFFS.open(fname);
     load(f, f.size());
     f.close();
+  } else {
+    Serial.printf("The certificate does not exist: %s\r\n",fname);
   }
 }
 
@@ -537,34 +659,32 @@ void Send10Seconds2Cloud() {
   // DynamicJsonDocument is stored on the heap
   // Allocate a ArduinoJson buffer large enough to 10 seconds of Accelerometer trace data
   DynamicJsonDocument historydoc(16384);
-  JsonObject payload = historydoc.to<JsonObject>();
-  JsonObject status = payload.createNestedObject("d");
-  JsonArray  alltraces = status.createNestedArray("traces");
+  JsonObject payload      = historydoc.to<JsonObject>();
+  JsonArray  alltraces    = payload.createNestedArray("traces");
+  JsonObject acceleration = alltraces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
-  status["device_id"] = deviceID ;
+  payload["device_id"] = deviceID ;
+  payload["device_t"]  = time(nullptr);
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
-  JsonObject acceleration = alltraces.createNestedObject();
-
   AccelReading AccelRecord ;
-  //char reading[75];
   for( uint16_t idx=0; idx < StaLtaQue.getCount(); idx++ ) {
     if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
-      //sprintf( reading, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
+      //char reading[75];
+      //snprintf( reading, 74, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
       //Serial.println(reading);
 
       acceleration["x"].add(AccelRecord.x);
       acceleration["y"].add(AccelRecord.y);
       acceleration["z"].add(AccelRecord.z);
     }
-
   }
 
   // Serialize the History Json object into a string to be transmitted
   //serializeJson(historydoc,Serial);  // print to console
-  static char historymsg[16384];;
+  static char historymsg[16384];
   serializeJson(historydoc, historymsg, 16383);
 
   int jsonSize = measureJson(historydoc);
@@ -579,6 +699,7 @@ void Send10Seconds2Cloud() {
     NeoPixelStatus( LED_CONNECTED ); // Success - blink cyan
   }
 
+  mqtt.setBufferSize( 2000 );  // reset the MQTT buffer size
   historydoc.clear();
 }
 
@@ -586,16 +707,44 @@ void Send10Seconds2Cloud() {
 void SendLiveData2Cloud() {
   // variables to hold accelerometer data
   // DynamicJsonDocument is stored on the heap
-  JsonObject payload = jsonDoc.to<JsonObject>();
-  JsonObject status = payload.createNestedObject("d");
+  DynamicJsonDocument jsonDoc(3000);
+  JsonObject payload      = jsonDoc.to<JsonObject>();
+  JsonArray  traces       = payload.createNestedArray("traces");
+  JsonObject acceleration = traces.createNestedObject();
 
   // Load the key/value pairs into the serialized ArduinoJSON format
-  status["device_id"] = deviceID;
-  status["traces"] = traces;
+  payload["device_id"] = deviceID;
+  payload["device_t"]  = time(nullptr);
 
-  // Serialize the entire string to be transmitted
+  // Generate an array of json objects that contain x,y,z arrays of 32 floats.
+  // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
+  AccelReading AccelRecord ;
+  // Send the last 32 records (or less) from the queue
+  uint16_t idx = StaLtaQue.getCount() ;
+  if( idx >= 32 ) {
+    idx = idx - 32;
+  }
+  for( ; idx < StaLtaQue.getCount(); idx++ ) {
+    if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
+      //char reading[75];
+      //snprintf( reading, 74, "[ x=%3.3f , y=%3.3f , z=%3.3f ]", AccelRecord.x, AccelRecord.y, AccelRecord.z);
+      //Serial.println(reading);
+
+      acceleration["x"].add(AccelRecord.x);
+      acceleration["y"].add(AccelRecord.y);
+      acceleration["z"].add(AccelRecord.z);
+    }
+  }
+
+  // Serialize the current second Json object into a string to be transmitted
+  static char msg[2000];
   serializeJson(jsonDoc, msg, 2000);
   Serial.println(msg);
+
+  int jsonSize = measureJson(jsonDoc);
+  Serial.print("Sending 1 second of accelerometer readings in a MQTT packet of size: ");
+  Serial.println( jsonSize );
+  mqtt.setBufferSize( (jsonSize + 50 ));  // increase the MQTT buffer size
 
   // Publish the message to MQTT Broker
   if (!mqtt.publish(MQTT_TOPIC, msg)) {
@@ -604,6 +753,7 @@ void SendLiveData2Cloud() {
     NeoPixelStatus( LED_CONNECTED ); // Success - blink cyan
   }
 
+  mqtt.setBufferSize( 2000 );  // reset the MQTT buffer size
   jsonDoc.clear();
 }
 
@@ -615,23 +765,23 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_STA_START:     // 2
       Serial.println("ESP32 WiFi started");
+      WiFi.setHostname("openeew-sensor-wifi");
       break;
     case SYSTEM_EVENT_SCAN_DONE:
       Serial.println("Completed scan for access points");
       break;
     case SYSTEM_EVENT_STA_CONNECTED: // 4
       Serial.println("ESP32 WiFi connected to AP");
-      WiFi.setHostname("openeew-sensor-wifi");
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       Serial.println("Disconnected from WiFi access point");
-      wificonnected = false;
+      bWiFiConnected = false;
       break;
     case SYSTEM_EVENT_STA_GOT_IP:    // 7
       Serial.println("ESP32 station got IP from connected AP");
       Serial.print("Obtained IP address: ");
       Serial.println( WiFi.localIP() );
-      if( eth_connected ) {
+      if( bEthConnected ) {
         Serial.println("Ethernet is already connected");
       }
       break;
@@ -642,8 +792,7 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_ETH_CONNECTED:
       Serial.println("ETH Connected");
-      Serial.print("ETH MAC: ");
-      Serial.println(ETH.macAddress());
+      bEthConnecting = true;
       break;
     case SYSTEM_EVENT_ETH_GOT_IP:
       Serial.print("ETH MAC: ");
@@ -656,28 +805,30 @@ void NetworkEvent(WiFiEvent_t event) {
       Serial.print(", ");
       Serial.print(ETH.linkSpeed());
       Serial.println("Mbps");
-      eth_connected = true;
+      bEthConnected = true;
 
       // Switch the MQTT connection to Ethernet from WiFi (or initially)
-      // Preference the Ethernet wired interence if its available
+      // Preference the Ethernet wired interface if its available
       // Disconnect the MQTT session
       if( mqtt.connected() ){
-        mqtt.disconnect();
+        Serial.println("Previously connected to WiFi, try to switch the MQTT connection to Ethernet");
+        bNetworkInterfaceChanged = true;
         // No need to call mqtt.setClient(ETH); because ETH is a ETHClient which is not the same class as WiFi client
         // Connect2MQTTbroker(); // The MQTT reconnect will be handled by the main loop()
       }
       break;
     case SYSTEM_EVENT_ETH_DISCONNECTED:
       Serial.println("ETH Disconnected");
-      eth_connected = false;
+      bEthConnected = false;
       // Disconnect the MQTT client
       if( mqtt.connected() ){
-        mqtt.disconnect();
+        Serial.println("Previously connected to Ethernet, try to switch the MQTT connection to WiFi");
+        bNetworkInterfaceChanged = true;
       }
       break;
     case SYSTEM_EVENT_ETH_STOP:
       Serial.println("ETH Stopped");
-      eth_connected = false;
+      bEthConnected = false;
       break;
     case SYSTEM_EVENT_STA_STOP:
       Serial.println("WiFi Stopped");
@@ -697,11 +848,16 @@ void NetworkEvent(WiFiEvent_t event) {
 }
 
 
+time_t periodic_timesync;
 // MQTT SSL requires a relatively accurate time between broker and client
 void SetTimeESP32() {
+  time_t now = time(nullptr);
+  Serial.print("Before time sync: ");
+  Serial.print(ctime(&now));
+
   // Set time from NTP servers
   configTime(TZ_OFFSET * 3600, TZ_DST * 60, "time.nist.gov", "pool.ntp.org");
-  Serial.println("\nWaiting for time");
+  Serial.print("Waiting for time");
   while(time(nullptr) <= 100000) {
     NeoPixelStatus( LED_FIRMWARE_DFU ); // blink yellow
     Serial.print(".");
@@ -710,16 +866,18 @@ void SetTimeESP32() {
   unsigned timeout = 5000;
   unsigned start = millis();
   while (millis() - start < timeout) {
-      time_t now = time(nullptr);
+      now = time(nullptr);
       if (now > (2019 - 1970) * 365 * 24 * 3600) {
           break;
       }
       delay(100);
   }
   delay(1000); // Wait for time to fully sync
-  Serial.println("Time sync'd");
-  time_t now = time(nullptr);
-  Serial.println(ctime(&now));
+
+  Serial.print("\nAfter time sync : ");
+  now = time(nullptr);
+  Serial.print(ctime(&now));
+  periodic_timesync = now;     // periodically resync the time to prevent drift
 }
 
 
@@ -731,20 +889,41 @@ void setup() {
   Serial.println();
   Serial.println("OpenEEW Sensor Application");
 
-  strip.setBrightness(130);  // Dim the LED to 50% - 0 off, 255 full bright
+  // Starting the ESP with the LEDs on can cause brownouts
+  NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+  strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
 
-  // Start WiFi connection
+  // Start Network connections
   WiFi.onEvent(NetworkEvent);
-  WiFi.mode(WIFI_STA);
 
-  wificonnected = WiFiScanAndConnect();
-  if( !wificonnected )  {
-    while( !startSmartConfig() ) {
-      // loop in SmartConfig until the user provides
-      // the correct WiFi SSID and password
+  // Start the ETH interface, if it is available, before WiFi
+  ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
+  delay(5000);
+  if( bEthConnecting ) {
+    while( !bEthConnected ) {
+      Serial.println("Waiting for Ethernet to start...");
+      delay( 500 );
     }
   }
-  Serial.println("WiFi Connected");
+
+  WiFi.mode(WIFI_STA);
+  bWiFiConnected = WiFiScanAndConnect();
+  if( !bWiFiConnected )  {
+    // If the sensor has been registered in the past
+    // at least one WiFi network will have been stored in NVM
+    // and if the Ethernet cable is connected, do not
+    // loop in SmartConfig, just use the hardwired connection.
+    if( numNetworksStored() && bEthConnected ) {
+      Serial.println("Previously registered device, use hardwired Ethernet connection.");
+    } else {
+      while( !startSmartConfig() ) {
+        // loop in SmartConfig until the user provides
+        // the correct WiFi SSID and password
+      }
+    }
+  } else {
+    Serial.println("WiFi Connected");
+  }
 
   byte mac[6];                     // the MAC address of your Wifi shield
   WiFi.macAddress(mac);
@@ -753,14 +932,9 @@ void setup() {
   Serial.print("WiFi MAC: ");
   Serial.println(WiFi.macAddress());
 
-  // Start the ETH interface
-  ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
-  Serial.print("ETH  MAC: ");
-  Serial.println(ETH.macAddress());
-
   // Use the reverse octet Mac Address as the MQTT deviceID
-  //sprintf(deviceID,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
-  sprintf(deviceID,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+  //snprintf(deviceID,13,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+  snprintf(deviceID,13,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
   Serial.println(deviceID);
 
   // Set the time on the ESP32
@@ -775,20 +949,20 @@ void setup() {
 
   // Dynamically build the MQTT Device ID from the Mac Address of this ESP32
   // MQTT_ORGID was retreived by the OpenEEWDeviceActivation() function
-  //sprintf(MQTT_DEVICEID,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
-  sprintf(MQTT_DEVICEID,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+  //snprintf(MQTT_DEVICEID,30,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
+  snprintf(MQTT_DEVICEID,30,"d:%s:%s:%02X%02X%02X%02X%02X%02X",MQTT_ORGID,MQTT_DEVICETYPE,mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
   Serial.println(MQTT_DEVICEID);
 
 #ifdef MQTT_LOCALBROKER
-  sprintf(MQTT_HOST,MQTT_LOCALBROKER);  // Enter the IP address of the MQTT broker on your local subnet
+  snprintf(MQTT_HOST,48,MQTT_LOCALBROKER);  // Enter the IP address of the MQTT broker on your local subnet
 #else
-  sprintf(MQTT_HOST,"%s.messaging.internetofthings.ibmcloud.com",MQTT_ORGID);  // Centrally managed
+  snprintf(MQTT_HOST,48,"%s.messaging.internetofthings.ibmcloud.com",MQTT_ORGID);  // Centrally managed
 
   loadCertificates( &wifiClient );      // Load the Watson IoT messaging.pem CA Cert from SPIFFS
 #endif
 
   char mqttparams[100]; // Allocate a buffer large enough for this string ~95 chars
-  sprintf(mqttparams, "MQTT_USER:%s  MQTT_TOKEN:%s  MQTT_DEVICEID:%s", MQTT_USER, MQTT_TOKEN, MQTT_DEVICEID);
+  snprintf(mqttparams, 99, "MQTT_USER:%s  MQTT_TOKEN:%s  MQTT_DEVICEID:%s", MQTT_USER, MQTT_TOKEN, MQTT_DEVICEID);
   Serial.println(mqttparams);
 
   // Connect to MQTT - IBM Watson IoT Platform
@@ -816,20 +990,6 @@ void setup() {
   digitalWrite(io, LOW); // turn off buzzer
 }
 
-bool  bPossibleEarthQuake      = false;
-double  thresh          = 3.0;
-double    stalta[3]     = { 0, 0, 0 };
-double    sample[3]     = { 0, 0, 0 };
-double    sampleSUM[3]  = { 0, 0, 0 };
-double        ltSUM[3]  = { 0, 0, 0 };
-double    sample1[3]    = { 0, 0, 0 };
-double LTAsample1[3]    = { 0, 0, 0 };
-double     offset[3]    = { 0, 0, 0 };
-double  sampleABS[3]    = { 0, 0, 0 };
-double sample1ABS       = 0;
-double LTAsample1ABS    = 0;
-double       stav[3]    = { 0, 0, 0 };
-double       ltav[3]    = { 0, 0, 0 };
 
 void loop() {
   mqtt.loop();
@@ -842,43 +1002,45 @@ void loop() {
     adxstatus = adxl355.getStatus();
 
     if (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL) {
+      // Keep track of the heap in case heap fragmentation returns
+      //Serial.println( xPortGetFreeHeapSize() );
       int numEntriesFifo = adxl355.readFifoEntries( (long *)fifoOut ) ;
       if ( numEntriesFifo != -1 ) {
-        // Generate an array of json objects that contain x,y,z arrays of 32 floats.
-        // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
-        JsonObject acceleration = traces.createNestedObject();
+        // Declare one AccelReading structure for this iteration of loop()
+        // so it doesn't need to go in and out of scope in various for() loops below
+        //   typedef struct AccelXYZ {
+        //     double x; double y; double z;
+        //   } AccelReading ;
+        AccelReading AccelRecord;
 
         // [{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]},{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]}]
         double gal;
         double x, y, z;
         for (int i = 0; i < numEntriesFifo; i++) {
-          AccelReading AccelRecord;
           gal = adxl355.valueToGals(fifoOut[i][0]);
           x = round(gal*1000)/1000;
-          acceleration["x"].add(x);
           AccelRecord.x = x;
 
           gal = adxl355.valueToGals(fifoOut[i][1]);
           y = round(gal*1000)/1000;
-          acceleration["y"].add(y);
           AccelRecord.y = y;
 
           gal = adxl355.valueToGals(fifoOut[i][2]);
           z = round(gal*1000)/1000;
-          acceleration["z"].add(z);
           AccelRecord.z = z;
 
           StaLtaQue.push(&AccelRecord);
         }
 
         // Do some STA / LTA math here...
-        // ...
+        char mathmsg[65];
+        snprintf(mathmsg, 64, "Calculating STA/LTA from %d accelerometer readings", StaLtaQue.getCount());
+        //Serial.println(mathmsg);
         if( StaLtaQue.isFull() ) {
           /////////////////// find offset ////////////////
           int queCount = StaLtaQue.getCount( );
 
           for (int idx = 0; idx < queCount; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sample[0] = AccelRecord.x;
               sample[1] = AccelRecord.y;
@@ -891,13 +1053,12 @@ void loop() {
           for (int j = 0; j < 3; j++) {
             offset[j]  = sampleSUM[j] / (QUE_len);
           }
-          
+
           /////////////////// find lta /////////////////
           sampleSUM[0] = 0;
           sampleSUM[1] = 0;
           sampleSUM[2] = 0;
           for (int idx = 0; idx < LTA_len; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sampleABS[0] = abs( AccelRecord.x - offset[0] );
               sampleABS[1] = abs( AccelRecord.y - offset[1] );
@@ -910,13 +1071,12 @@ void loop() {
           for (int j = 0; j < 3; j++) {
             ltav[j]  = sampleSUM[j] / (LTA_len);
           }
-          
+
           //////////////////// find sta ///////////////////////
           sampleSUM[0] = 0;
           sampleSUM[1] = 0;
           sampleSUM[2] = 0;
           for (int idx = LTA_len-STA_len ; idx < LTA_len; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sampleABS[0] = abs( AccelRecord.x - offset[0] );
               sampleABS[1] = abs( AccelRecord.y - offset[1] );
@@ -933,7 +1093,7 @@ void loop() {
               if ( stalta[j] >= thresh ) {
                 // Whoa - STA/LTA algorithm detected some anomalous shaking
                 Serial.printf("STA/LTA = %f = %f / %f (%i)\n", stalta[j], stav[j], ltav[j], j );
-                bPossibleEarthQuake = true ; 
+                bPossibleEarthQuake = true ;
               }
             }
           }
@@ -941,7 +1101,6 @@ void loop() {
           //// find STA/LTA for the other 31 samples but without doing the summing again
 
           for (int idx = LTA_len+1; idx < QUE_len; idx++) {
-            AccelReading AccelRecord;
             if( StaLtaQue.peekIdx( &AccelRecord, idx) ) {
               sample[0] = AccelRecord.x;
               sample[1] = AccelRecord.y;
@@ -975,39 +1134,47 @@ void loop() {
           }
         }
 
-        // If STA/LTA algorithm detected some anomalous shaking
-        if( bPossibleEarthQuake ) {
+        if( numSecsOfAccelReadings > 0 ) {
+          SendLiveData2Cloud();
+          numSecsOfAccelReadings-- ;
           bPossibleEarthQuake=false;
+        } else if( bPossibleEarthQuake ) {
+          // The STA/LTA algorithm detected some anomalous shaking
+          // If this is continued shaking, the above SendLiveData2Cloud()
+          // function has already sent current accelerometer data
+          // so don't send it again.
+          bPossibleEarthQuake=false;
+
           // Start sending 5 minutes of live accelerometer data
+          Serial.println("Start sending 5 minutes of live accelerometer data");
           numSecsOfAccelReadings = 300 ;
+
           // Send the previous 10 seconds of history to the cloud
           Send10Seconds2Cloud();
         }
-        char mathmsg[65];
-        sprintf(mathmsg, "%d accelerometer readings on the StaLta Queue", StaLtaQue.getCount());
-        Serial.println(mathmsg);
-        // When the math is done, drop 32 records off the queue
+
+        // When this loop is done, drop 32 records off the queue
         if( StaLtaQue.isFull() ) {
           for( int i=0; i < 32; i++ )
             StaLtaQue.drop();
         }
 
-        if( numSecsOfAccelReadings > 0 ) {
-          SendLiveData2Cloud();
-          numSecsOfAccelReadings-- ;
-        }
-        // Clear & Reset JsonArrays
-        jsonTraces.clear();
-        traces = jsonTraces.to<JsonArray>();
-
         //Switch the direction of the LEDs
         breathedirection = breathedirection ? false : true;
       }
+
+    // Keep track of the heap in case heap fragmentation returns
+    //Serial.println( xPortGetFreeHeapSize() );
     }
   }
 
   if( adxstatus )
     NeoPixelBreathe();
+
+  if( (time(nullptr) - periodic_timesync) > RESYNCTIME ) {
+    // Resync the ESP32 time once a day so that MQTT and Seismology time is accurate
+    SetTimeESP32();
+  }
 
   delay(10);
 }
@@ -1041,6 +1208,7 @@ int numScannedNetworks() {
   return n;
 }
 
+
 //Return how many networks are stored in the NVM
 int numNetworksStored() {
   prefs.begin("networks", true);
@@ -1051,6 +1219,7 @@ int numNetworksStored() {
 
   return networksStored;
 }
+
 
 //Each network as an id so reading the network stored with said ID.
 void readNetworkStored(int netId)
@@ -1071,6 +1240,7 @@ void readNetworkStored(int netId)
   DEBUG_L2(_pswd);  // off by default
   Serial.println("xxxxxx");
 }
+
 
 //Save a pair of SSID and PSWD to NVM
 void storeNetwork(String ssid, String pswd)
@@ -1096,6 +1266,20 @@ void storeNetwork(String ssid, String pswd)
   Serial.print(aux_num_nets);
   Serial.println(" networks stored in NVM");
 }
+
+
+//Clear all networks stored in the NVM, force SmartConfig
+void clearNetworks() {
+  Serial.println("Clear all stored networks from NVM");
+  prefs.begin("networks", false);
+  if( prefs.clear() ) {
+    Serial.println("All networks have been erased");
+  } else {
+    Serial.println("Failed to clear WiFi networks");
+  }
+  prefs.end();
+}
+
 
 //Joins the previous functions, gets the stored networks and compares to the available, if there is a match and connects, return true
 //if no match or unable to connect, return false.
@@ -1137,32 +1321,54 @@ bool WiFiScanAndConnect()
   return false;
 }
 
+
 // Executes the Smart config routine and if connected, will save the network for future use
 bool startSmartConfig()
 {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP_STA);
   WiFi.beginSmartConfig();
+  int RouterDownTimeOut = 0;
 
   // Wait for SmartConfig packet from mobile
-  Serial.println("Waiting for SmartConfig.");
-  while( !WiFi.smartConfigDone() || eth_connected ) {
+  Serial.print("Waiting for SmartConfig or Router to restart" );
+  while( !WiFi.smartConfigDone() ) {
     delay(500);
-    Serial.print(".");
+    Serial.print("Waiting for SmartConfig or WiFi Router to recover (10 minutes ~ 650 ticks): " );
+    Serial.println( RouterDownTimeOut );
     NeoPixelStatus( LED_LISTEN_WIFI );  // blink blue
+    if( RouterDownTimeOut < 650 ) {
+      RouterDownTimeOut++;
+    } else if( !numNetworksStored() ) {
+      // There are no stored WiFi network credentials, keep waiting
+      RouterDownTimeOut = 0;
+    } else {
+      // Maybe the router was down and this device normally connects to a network.
+      // If there's a power outage in the building and power is restored, the device comes up first/fast.
+      // The wifi router might not yet be available. The device goes into SmartConfig polling mode and never recovers.
+      // Eventually the network router comes up but the device is stuck because its looping here.
+      // A restart 10 minutes later would bring it back to normal.
+      // This could be a common problem in the field. Don't dispatch someone just to power cycle the sensor.
+      Serial.println("Router Recovery? Restart OpenEEW device to retry saved networks");
+      esp_restart();
+    }
+
+    if( bEthConnected ) {
+      // Ethernet cable was connected during SmartConfig
+      if( numNetworksStored() ) {
+        Serial.println("Previously registered device, Skip SmartConfig, Use hardwired Ethernet connection.");
+        // Skip SmartConfig
+        WiFi.stopSmartConfig();
+        return true;
+      }
+    }
   }
 
+  Serial.println("SmartConfig received.");
   for( int i=0;i<4;i++){
     delay(500);
     NeoPixelStatus( LED_CONNECT_WIFI ); // Success - blink green
   }
-
-  if( eth_connected ) {
-    // Ethernet cable was connected during or before SmartConfig
-    // Skip SmartConfig
-    return true;
-  }
-  Serial.println("SmartConfig received.");
 
   // Wait for WiFi to connect to AP
   Serial.println("Waiting for WiFi");
@@ -1185,7 +1391,7 @@ bool startSmartConfig()
     return true;
   }
   else {
-    Serial.println("Something went wrong with SmartConfig");
+    Serial.println("SmartConfig received an incorrect WiFi password.");
     WiFi.stopSmartConfig();
     return false;
   }
@@ -1234,6 +1440,10 @@ void NeoPixelStatus( int status ) {
       strip.fill( strip.Color(255,255,0), 0, 3);  // Yellow
       Serial.println("LED_FIRMWARE_DFU - Yellow");
       break;
+    case LED_ORANGE :
+      strip.fill( strip.Color(255,165,0), 0, 3);  // Red
+      Serial.println("LED_ORANGE - Orange");
+      break;
     case LED_ERROR :
       strip.fill( strip.Color(255,0,0), 0, 3);  // Red
       Serial.println("LED_ERROR - Red");
@@ -1260,13 +1470,18 @@ void NeoPixelBreathe() {
 
 
 // Sound the Buzzer & Blink the LED
-void EarthquakeAlarm() {
+void EarthquakeAlarm( int AlarmLEDColor ) {
   Serial.println("Earthquake Alarm!");
+  strip.setBrightness(255);       // The breathe intensity might have the brightness low
   for( int i=0;i<10;i++) {
-    delay(500);
-    NeoPixelStatus( LED_ERROR ); // Alarm - blink red
-    AlarmBuzzer();
+    if( !bStopEarthquakeAlarm ) {
+      delay(500);
+      NeoPixelStatus( AlarmLEDColor ); // Alarm - blink red or orange
+      AlarmBuzzer();
+    }
+    mqtt.loop();  // Process any incoming MQTT topics (which might stop the alarm)
   }
+  strip.setBrightness( breatheintensity );  // reset the brightness to the prior intensity
   digitalWrite(io, LOW); // turn off buzzer
 }
 
