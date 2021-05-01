@@ -95,7 +95,7 @@ int networksStored;
 static bool bEthConnected  = false;
 static bool bEthConnecting = false;
 static bool bWiFiConnected  = false;
-
+static bool bNetworkInterfaceChanged = false;
 
 // --------------------------------------------------------------------------------------------
 // ADXL Accelerometer
@@ -508,6 +508,10 @@ bool OpenEEWDeviceActivation() {
 
 
 void Connect2MQTTbroker() {
+  if( bNetworkInterfaceChanged ) {
+    mqtt.disconnect();
+    bNetworkInterfaceChanged = false;
+  }
   while (!mqtt.connected()) {
     Serial.print("Attempting MQTT connection...");
     NeoPixelStatus( LED_CONNECT_CLOUD ); // blink cyan
@@ -711,7 +715,7 @@ void NetworkEvent(WiFiEvent_t event) {
       // Disconnect the MQTT session
       if( mqtt.connected() ){
         Serial.println("Previously connected to WiFi, try to switch the MQTT connection to Ethernet");
-        mqtt.disconnect();
+        bNetworkInterfaceChanged = true;
         // No need to call mqtt.setClient(ETH); because ETH is a ETHClient which is not the same class as WiFi client
         // Connect2MQTTbroker(); // The MQTT reconnect will be handled by the main loop()
       }
@@ -722,7 +726,7 @@ void NetworkEvent(WiFiEvent_t event) {
       // Disconnect the MQTT client
       if( mqtt.connected() ){
         Serial.println("Previously connected to Ethernet, try to switch the MQTT connection to WiFi");
-        mqtt.disconnect();
+        bNetworkInterfaceChanged = true;
       }
       break;
     case SYSTEM_EVENT_ETH_STOP:
