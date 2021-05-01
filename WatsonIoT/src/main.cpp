@@ -90,8 +90,10 @@ Preferences prefs;
 String _ssid;    // your network SSID (name) - loaded from NVM
 String _pswd;    // your network password    - loaded from NVM
 int networksStored;
-static bool eth_connected = false;
-static bool wificonnected = false;
+static bool bEthConnected  = false;
+static bool bEthConnecting = false;
+static bool bWiFiConnected  = false;
+
 
 // --------------------------------------------------------------------------------------------
 // ADXL Accelerometer
@@ -665,13 +667,13 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_STA_DISCONNECTED:
       Serial.println("Disconnected from WiFi access point");
-      wificonnected = false;
+      bWiFiConnected = false;
       break;
     case SYSTEM_EVENT_STA_GOT_IP:    // 7
       Serial.println("ESP32 station got IP from connected AP");
       Serial.print("Obtained IP address: ");
       Serial.println( WiFi.localIP() );
-      if( eth_connected ) {
+      if( bEthConnected ) {
         Serial.println("Ethernet is already connected");
       }
       break;
@@ -682,8 +684,7 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_ETH_CONNECTED:
       Serial.println("ETH Connected");
-      Serial.print("ETH MAC: ");
-      Serial.println(ETH.macAddress());
+      bEthConnecting = true;
       break;
     case SYSTEM_EVENT_ETH_GOT_IP:
       Serial.print("ETH MAC: ");
@@ -696,7 +697,7 @@ void NetworkEvent(WiFiEvent_t event) {
       Serial.print(", ");
       Serial.print(ETH.linkSpeed());
       Serial.println("Mbps");
-      eth_connected = true;
+      bEthConnected = true;
 
       // Switch the MQTT connection to Ethernet from WiFi (or initially)
       // Preference the Ethernet wired interface if its available
@@ -710,7 +711,7 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_ETH_DISCONNECTED:
       Serial.println("ETH Disconnected");
-      eth_connected = false;
+      bEthConnected = false;
       // Disconnect the MQTT client
       if( mqtt.connected() ){
         Serial.println("Previously connected to Ethernet, try to switch the MQTT connection to WiFi");
@@ -719,7 +720,7 @@ void NetworkEvent(WiFiEvent_t event) {
       break;
     case SYSTEM_EVENT_ETH_STOP:
       Serial.println("ETH Stopped");
-      eth_connected = false;
+      bEthConnected = false;
       break;
     case SYSTEM_EVENT_STA_STOP:
       Serial.println("WiFi Stopped");
@@ -782,23 +783,33 @@ void setup() {
 
   strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
 
-  // Start WiFi connection
+  // Start Network connections
   WiFi.onEvent(NetworkEvent);
-  WiFi.mode(WIFI_STA);
 
-  wificonnected = WiFiScanAndConnect();
-  if( !wificonnected )  {
+  // Start the ETH interface, if it is available, before WiFi
+  ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
+  delay(5000);
+  if( bEthConnecting ) {
+    while( !bEthConnected ) {
+      Serial.println("Waiting for Ethernet to start...");
+      delay( 500 );
+    }
+  }
+
+  WiFi.mode(WIFI_STA);
+  bWiFiConnected = WiFiScanAndConnect();
+  if( !bWiFiConnected )  {
     // If the sensor has been registered in the past
     // at least one WiFi network will have been stored in NVM
     // and if the Ethernet cable is connected, do not
     // loop in SmartConfig, just use the hardwired connection.
-    if( !numNetworksStored() && !eth_connected ) {
+    if( numNetworksStored() && bEthConnected ) {
+      Serial.println("Previously registered device, use hardwired Ethernet connection.");
+    } else {
       while( !startSmartConfig() ) {
         // loop in SmartConfig until the user provides
         // the correct WiFi SSID and password
       }
-    } else {
-      Serial.println("Use hardwired Ethernet connection.");
     }
   } else {
     Serial.println("WiFi Connected");
@@ -810,11 +821,6 @@ void setup() {
   // Output this ESP32 Unique WiFi MAC Address
   Serial.print("WiFi MAC: ");
   Serial.println(WiFi.macAddress());
-
-  // Start the ETH interface
-  ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
-  Serial.print("ETH  MAC: ");
-  Serial.println(ETH.macAddress());
 
   // Use the reverse octet Mac Address as the MQTT deviceID
   //snprintf(deviceID,13,"%02X%02X%02X%02X%02X%02X",mac[5],mac[4],mac[3],mac[2],mac[1],mac[0]);
@@ -1092,6 +1098,7 @@ int numScannedNetworks() {
   return n;
 }
 
+
 //Return how many networks are stored in the NVM
 int numNetworksStored() {
   prefs.begin("networks", true);
@@ -1102,6 +1109,7 @@ int numNetworksStored() {
 
   return networksStored;
 }
+
 
 //Each network as an id so reading the network stored with said ID.
 void readNetworkStored(int netId)
@@ -1122,6 +1130,7 @@ void readNetworkStored(int netId)
   DEBUG_L2(_pswd);  // off by default
   Serial.println("xxxxxx");
 }
+
 
 //Save a pair of SSID and PSWD to NVM
 void storeNetwork(String ssid, String pswd)
@@ -1148,6 +1157,7 @@ void storeNetwork(String ssid, String pswd)
   Serial.println(" networks stored in NVM");
 }
 
+
 //Clear all networks stored in the NVM, force SmartConfig
 void clearNetworks() {
   Serial.println("Clear all stored networks from NVM");
@@ -1159,6 +1169,7 @@ void clearNetworks() {
   }
   prefs.end();
 }
+
 
 //Joins the previous functions, gets the stored networks and compares to the available, if there is a match and connects, return true
 //if no match or unable to connect, return false.
@@ -1200,6 +1211,7 @@ bool WiFiScanAndConnect()
   return false;
 }
 
+
 // Executes the Smart config routine and if connected, will save the network for future use
 bool startSmartConfig()
 {
@@ -1210,7 +1222,7 @@ bool startSmartConfig()
 
   // Wait for SmartConfig packet from mobile
   Serial.print("Waiting for SmartConfig or Router to restart" );
-  while( !WiFi.smartConfigDone() || eth_connected ) {
+  while( !WiFi.smartConfigDone() ) {
     delay(500);
     Serial.print("Waiting for SmartConfig or WiFi Router to recover (10 minutes ~ 650 ticks): " );
     Serial.println( RouterDownTimeOut );
@@ -1230,21 +1242,23 @@ bool startSmartConfig()
       Serial.println("Router Recovery? Restart OpenEEW device to retry saved networks");
       esp_restart();
     }
+
+    if( bEthConnected ) {
+      // Ethernet cable was connected during SmartConfig
+      if( numNetworksStored() ) {
+        Serial.println("Previously registered device, Skip SmartConfig, Use hardwired Ethernet connection.");
+        // Skip SmartConfig
+        WiFi.stopSmartConfig();
+        return true;
+      }
+    }
   }
 
+  Serial.println("SmartConfig received.");
   for( int i=0;i<4;i++){
     delay(500);
     NeoPixelStatus( LED_CONNECT_WIFI ); // Success - blink green
   }
-
-  if( eth_connected ) {
-    // Ethernet cable was connected during or before SmartConfig
-    Serial.println("Skip SmartConfig. Use hardwired Ethernet connection.");
-    // Skip SmartConfig
-    WiFi.stopSmartConfig();
-    return true;
-  }
-  Serial.println("SmartConfig received.");
 
   // Wait for WiFi to connect to AP
   Serial.println("Waiting for WiFi");
