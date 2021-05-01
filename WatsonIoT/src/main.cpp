@@ -6,14 +6,16 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <HTTPClient.h>
-#include <Adxl355.h>  // forked from https://github.com/markrad/esp32-ADXL355
+#include <Adxl355.h>            // forked from https://github.com/markrad/esp32-ADXL355
 #include <math.h>
 #include <esp_https_ota.h>
 #include <esp_task_wdt.h>
 #include <SPIFFS.h>
 #include "config.h"
-#include "semver.h"  // from https://github.com/h2non/semver.c
+#include "semver.h"             // from https://github.com/h2non/semver.c
 #include <cppQueue.h>
+#include "soc/soc.h"            // Enable/Disable BrownOut detection
+#include "soc/rtc_cntl_reg.h"
 
 // Watson IoT connection details
 static char MQTT_HOST[48];            // ORGID.messaging.internetofthings.ibmcloud.com
@@ -206,6 +208,10 @@ void StartADXL355() {
   adxl355.start();
   delay(1000);
 
+  // Calibrating the ADXL355 can cause brownouts
+  NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
   if (adxl355.isDeviceRecognized()) {
     Serial.println("Initializing sensor");
     adxl355.initializeSensor(range, odr_lpf, debug);
@@ -227,6 +233,7 @@ void StartADXL355() {
     Serial.println("Unable to get accelerometer");
   }
   Serial.println("Finished accelerometer configuration");
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
 }
 
 
@@ -781,6 +788,8 @@ void setup() {
   Serial.println();
   Serial.println("OpenEEW Sensor Application");
 
+  // Starting the ESP with the LEDs on can cause brownouts
+  NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
   strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
 
   // Start Network connections
