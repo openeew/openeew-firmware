@@ -739,8 +739,13 @@ void NetworkEvent(WiFiEvent_t event) {
 }
 
 
+time_t periodic_timesync;
 // MQTT SSL requires a relatively accurate time between broker and client
 void SetTimeESP32() {
+  time_t now = time(nullptr);
+  Serial.print("Before time sync : ");
+  Serial.println(ctime(&now));
+
   // Set time from NTP servers
   configTime(TZ_OFFSET * 3600, TZ_DST * 60, "time.nist.gov", "pool.ntp.org");
   Serial.println("\nWaiting for time");
@@ -759,9 +764,11 @@ void SetTimeESP32() {
       delay(100);
   }
   delay(1000); // Wait for time to fully sync
-  Serial.println("Time sync'd");
-  time_t now = time(nullptr);
+
+  Serial.print("After time sync: ");
+  now = time(nullptr);
   Serial.println(ctime(&now));
+  periodic_timesync = now;     // periodically resync the time to prevent drift
 }
 
 
@@ -1047,6 +1054,11 @@ void loop() {
 
   if( adxstatus )
     NeoPixelBreathe();
+
+  if( (time(nullptr) - periodic_timesync) > RESYNCTIME ) {
+    // Resync the ESP32 time once a day so that MQTT and Seismology time is accurate
+    SetTimeESP32();
+  }
 
   delay(10);
 }

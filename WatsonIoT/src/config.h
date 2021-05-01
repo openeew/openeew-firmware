@@ -35,7 +35,8 @@
     if (LOG_L2)     \
         Serial.println(x);
 
-#define CONNECTION_TO 6000    //ms
+#define CONNECTION_TO   6000  //ms
 #define RECONNECTION_TO 10000 //ms
+#define RESYNCTIME      86400 // Resync the ESP32 time once a day
 
 #define PRODUCTION_BOARD 1
