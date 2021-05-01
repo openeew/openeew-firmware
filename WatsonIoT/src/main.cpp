@@ -743,12 +743,12 @@ time_t periodic_timesync;
 // MQTT SSL requires a relatively accurate time between broker and client
 void SetTimeESP32() {
   time_t now = time(nullptr);
-  Serial.print("Before time sync : ");
-  Serial.println(ctime(&now));
+  Serial.print("Before time sync: ");
+  Serial.print(ctime(&now));
 
   // Set time from NTP servers
   configTime(TZ_OFFSET * 3600, TZ_DST * 60, "time.nist.gov", "pool.ntp.org");
-  Serial.println("\nWaiting for time");
+  Serial.print("Waiting for time");
   while(time(nullptr) <= 100000) {
     NeoPixelStatus( LED_FIRMWARE_DFU ); // blink yellow
     Serial.print(".");
@@ -757,7 +757,7 @@ void SetTimeESP32() {
   unsigned timeout = 5000;
   unsigned start = millis();
   while (millis() - start < timeout) {
-      time_t now = time(nullptr);
+      now = time(nullptr);
       if (now > (2019 - 1970) * 365 * 24 * 3600) {
           break;
       }
@@ -765,9 +765,9 @@ void SetTimeESP32() {
   }
   delay(1000); // Wait for time to fully sync
 
-  Serial.print("After time sync: ");
+  Serial.print("\nAfter time sync : ");
   now = time(nullptr);
-  Serial.println(ctime(&now));
+  Serial.print(ctime(&now));
   periodic_timesync = now;     // periodically resync the time to prevent drift
 }
 
