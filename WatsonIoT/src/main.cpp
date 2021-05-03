@@ -12,6 +12,7 @@
 #include <esp_task_wdt.h>
 #include <SPIFFS.h>
 #include "config.h"
+#include "dlcert.h"
 #include "semver.h"             // from https://github.com/h2non/semver.c
 #include <cppQueue.h>
 #include "soc/soc.h"            // Enable/Disable BrownOut detection
@@ -63,6 +64,7 @@ PubSubClient mqtt(MQTT_HOST, MQTT_PORT, callback, wifiClient);
 // Activation
 bool OpenEEWDeviceActivation();
 bool FirmwareVersionCheck( char *, String );
+void PerformFirmwareOTA( String, const char *, uint );
 void SetTimeESP32();
 void SendLiveData2Cloud();
 void Send10Seconds2Cloud();
@@ -356,6 +358,32 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 
+void PerformFirmwareOTA( String firmware_ota_url, const char *DownloadServerPemChain, uint pemSize ) {
+  Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
+
+  // Increase the watchdog timer before starting the firmware upgrade
+  // The download and write can trip the watchdog timer and the old firmware
+  // will abort / reset before the new firmware is complete.
+  esp_task_wdt_init(15,0);
+  NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+
+  Serial.println("Starting OpenEEW OTA firmware upgrade...");
+  esp_http_client_config_t config = {0};
+  config.url = firmware_ota_url.c_str() ;
+  config.cert_pem = DownloadServerPemChain ;
+  esp_err_t ret = esp_https_ota(&config);
+  if (ret == ESP_OK) {
+      Serial.println("OTA upgrade downloaded. Restarting...");
+      WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
+      esp_restart();
+  } else {
+      esp_task_wdt_init(5,0);
+      Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
+  }
+}
+
+
 bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
   semver_t current_version = {};
   semver_t latest_version = {};
@@ -405,42 +433,29 @@ bool FirmwareVersionCheck( char *firmware_latest, String firmware_ota_url ) {
           DownloadServerPemChain = (char *)malloc(pemSize);
           if( pemSize != pemfile.readBytes(DownloadServerPemChain, pemSize) ) {
             Serial.printf("Reading %s pem server certificate chain failed.\r\n",DownloadServerCert);
+            Serial.println("Failback to inline download server certificate.");
+            PerformFirmwareOTA( firmware_ota_url, DownLoadOpenEEWPem, sizeof(DownLoadOpenEEWPem));
           } else {
             Serial.printf("Read %s pem server certificate chain from SPIFFS\r\n",DownloadServerCert);
-            Serial.write((const unsigned char*)DownloadServerPemChain,pemSize);
-
-            // Increase the watchdog timer before starting the firmware upgrade
-            // The download and write can trip the watchdog timer and the old firmware
-            // will abort / reset before the new firmware is complete.
-            esp_task_wdt_init(15,0);
-            NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
-            WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
-
-            Serial.println("Starting OpenEEW OTA firmware upgrade...");
-            esp_http_client_config_t config = {0};
-            config.url = firmware_ota_url.c_str() ;
-            config.cert_pem = DownloadServerPemChain ;
-            esp_err_t ret = esp_https_ota(&config);
-            if (ret == ESP_OK) {
-                Serial.println("OTA upgrade downloaded. Restarting...");
-                WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
-                esp_restart();
-            } else {
-                esp_task_wdt_init(5,0);
-                Serial.println("The OpenEEW OTA firmware upgrade failed : ESP_FAIL");
-            }
+            PerformFirmwareOTA( firmware_ota_url, DownloadServerPemChain, pemSize);
           }
           free( DownloadServerPemChain );
         } else {
           Serial.println("Failed to open server pem chain.");
+          Serial.println("Failback to inline download server certificate.");
+          PerformFirmwareOTA( firmware_ota_url, DownLoadOpenEEWPem, sizeof(DownLoadOpenEEWPem));
         }
         pemfile.close();
       } else {
         Serial.printf("The %s pem server certificate file does not exist.\r\n",DownloadServerCert);
         Serial.println("The SPIFFS filesystem might be empty.");
+        Serial.println("Failback to inline download server certificate.");
+        PerformFirmwareOTA( firmware_ota_url, DownLoadOpenEEWPem, sizeof(DownLoadOpenEEWPem));
       }
     } else {
       Serial.println("An error has occurred while mounting SPIFFS");
+      Serial.println("Failback to inline download server certificate.");
+      PerformFirmwareOTA( firmware_ota_url, DownLoadOpenEEWPem, sizeof(DownLoadOpenEEWPem));
     }
   }
   // Free allocated memory when we're done
