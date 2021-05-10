@@ -5,7 +5,7 @@
 #define OPENEEW_ACTIVATION_ENDPOINT "https://device-mgmt.openeew.com/activation?ver=1"
 // VERSION uses convention semver.org
 //  1.3.9 < 1.4.0 < 1.4.1-alpha.1 < 1.4.1-alpha.2 < 1.4.1-beta.1 < 1.4.1
-#define OPENEEW_FIRMWARE_VERSION    "1.5.1"
+#define OPENEEW_FIRMWARE_VERSION    "1.5.2"
 
 // Run this firmware with a MQTT Broker on a local subnet
 // One way of setting up a local subnet MQTT Broker, see
