@@ -892,9 +892,6 @@ void setup() {
   snprintf(mqttparams, 99, "MQTT_USER:%s  MQTT_TOKEN:%s  MQTT_DEVICEID:%s", MQTT_USER, MQTT_TOKEN, MQTT_DEVICEID);
   Serial.println(mqttparams);
 
-  // Connect to MQTT - IBM Watson IoT Platform
-  Connect2MQTTbroker();
-
 #if OPENEEW_SAMPLE_RATE_125
   odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
 #endif
@@ -915,6 +912,9 @@ void setup() {
   ledcAttachPin(io, channel);
   pinMode(io, OUTPUT);
   digitalWrite(io, LOW); // turn off buzzer
+
+  // Connect to MQTT - IBM Watson IoT Platform
+  Connect2MQTTbroker();
 }
 
 
