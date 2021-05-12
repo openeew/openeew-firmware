@@ -1,15 +1,6 @@
 # OpenEEW Sensor Firmware
 The OpenEEW sensor features a high performance MEMS accelerometer and Ethernet or WiFi connectivity. It includes also a loud buzzer and 3 bright Neopixel LEDS for alarm functions. By including alarm functions, the owners of the locations where they are installed are more likely to value and look after the device.
 
-The OpenEEW sensor has already shown itself to be [as good as seismometers that cost 60x more](https://openeew.com/blog/sensor-benchmark).
-
-![PCB](images/openeew-node-board.jpg)
-
-Please note the following pins:
-- ADXL355 > SPI (HSPI) > CS GPIO 15
-- Neopixel data pin> GPIO 16
-- Buzzer > GPIO 32
-
 ## Firmware
 
 [This code](https://github.com/openeew/openeew-firmware/tree/master/) allows an ESP32 device to send 3 axis accelerometer readings to a remote MQTT endpoint from its accelerometer to an MQTT endpoint. Optionally it also allows an attached NEO-6m GPS module to attach accurate time via the PPS signal (Pulse Per Second).
