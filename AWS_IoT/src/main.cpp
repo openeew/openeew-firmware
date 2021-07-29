@@ -1115,42 +1115,52 @@ void NeoPixelStatus( int status ) {
       strip.clear();  // Off
       break;
     case LED_CONNECTED :
-      strip.fill( strip.Color(0,255,255), 0, 3);  // Cyan breath
+      strip.setBrightness(20);
+      strip.fill( strip.Color(0,255,255), 0, 3);  // Cyan breath - dim
       Serial.println("LED_CONNECTED - Cyan");
       break;
     case LED_FIRMWARE_OTA :
+      strip.setBrightness(255);
       strip.fill( strip.Color(255,0,255), 0, 3);  // Magenta
       Serial.println("LED_FIRMWARE_OTA - Magenta");
       break;
     case LED_CONNECT_WIFI :
+      strip.setBrightness(255);
       strip.fill( strip.Color(0,255,0), 0, 3);  // Green
       Serial.println("LED_CONNECT_WIFI - Green");
       break;
     case LED_CONNECT_CLOUD :
+      strip.setBrightness(20);
       strip.fill( strip.Color(0,255,255), 0, 3);  // Cyan fast
       Serial.println("LED_CONNECT_CLOUD - Cyan");
       break;
     case LED_LISTEN_WIFI :
-      strip.fill( strip.Color(0,0,255), 0, 3);  // Blue
-      Serial.println("LED_LISTEN_WIFI - Blue");
+      strip.setBrightness(255);
+      strip.fill( strip.Color(255,165,0), 0, 3);  // Orange
+      Serial.println("LED_LISTEN_WIFI - Orange");
       break;
     case LED_WIFI_OFF :
+      strip.setBrightness(255);
       strip.fill( strip.Color(255,255,255), 0, 3);  // White
       Serial.println("LED_WIFI_OFF - White");
       break;
     case LED_SAFE_MODE :
+      strip.setBrightness(255);
       strip.fill( strip.Color(255,0,255), 0, 3);  // Magenta breath
       Serial.println("LED_SAFE_MODE - Magenta");
       break;
     case LED_FIRMWARE_DFU :
+      strip.setBrightness(255);
       strip.fill( strip.Color(255,255,0), 0, 3);  // Yellow
       Serial.println("LED_FIRMWARE_DFU - Yellow");
       break;
     case LED_ORANGE :
+      strip.setBrightness(255);
       strip.fill( strip.Color(255,165,0), 0, 3);  // Red
       Serial.println("LED_ORANGE - Orange");
       break;
     case LED_ERROR :
+      strip.setBrightness(255);
       strip.fill( strip.Color(255,0,0), 0, 3);  // Red
       Serial.println("LED_ERROR - Red");
       break;
