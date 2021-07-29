@@ -4,10 +4,6 @@ This firmware allows OpenEEW sensor to connect to AWS Iot MQTT broker.
 ## Operation
 In the program setup we check that the accelerometer is present, calibrate it and set the ODR, LPF and RANGE. The device reads the flash memory for saved networks and scans to see if they match any available. If there's a match, connect.
 
-For the loop, the device checks if still connected to WiFi, if not, retry connection. When a PPS signal is present, it interrupts the system, gets the timestamp and starts a micros timer.When the interrupt coming from the ADXL is present, meaning that FIFO is full, the system takes the timestamp, and attaches the micro seconds that passed since the PPS started, giving time accuracy. Then the device reads the FIFO values, puts them into a JSON message and sends them to the udpDestination and udpPort specified in the config file. Multiple FIFOS can be concatenated in a message, number of fifos in a message can be specified in the config file.
-
-For tracking purposes the traces have a consecutive id, this is not intended for a production firmware, their purpose is to count how many traces are sent and received.
-
 ## AWS IoT
 # AWS IoT Core Instructions
 
