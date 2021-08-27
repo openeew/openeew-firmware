@@ -50,10 +50,6 @@ String host = S3_FIRMWARE_BUCKET; // Host => bucket-name.s3.region.amazonaws.com
 int port = 80; // Non https. For HTTPS 443. As of today, HTTPS doesn't work.
 String bin = S3_FILE; // bin file name with a slash in front.
 
-//String host = "grillo-firmware.s3.amazonaws.com"; // Host => bucket-name.s3.region.amazonaws.com
-//int port = 80; // Non https. For HTTPS 443. As of today, HTTPS doesn't work.
-//String bin = "/S3_OTA.ino.esp32.bin"; // bin file name with a slash in front.
-
 String getHeaderValue(String header, String headerName) {
   return header.substring(strlen(headerName.c_str()));
 }
