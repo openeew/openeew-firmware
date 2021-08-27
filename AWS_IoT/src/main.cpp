@@ -31,9 +31,10 @@ const char MQTT_TOPIC_SENDACCEL[] = "iot-2/cmd/sendacceldata/fmt/json";
 const char MQTT_TOPIC_RESTART[] = "iot-2/cmd/forcerestart/fmt/json";
 const char MQTT_TOPIC_THRESHOLD[] = "iot-2/cmd/threshold/fmt/json";
 const char MQTT_TOPIC_FACTORYRST[] = "iot-2/cmd/factoryreset/fmt/json";
-const char MQTT_TOPIC_FWUPDATE[] = "iot-2/cmd/firmwareupdate/fmt/json";
 
 char deviceID[13];
+
+void callback(char* topic, byte* payload, unsigned int length);
 
 WiFiClientSecure net;
 PubSubClient client(net);
@@ -50,9 +51,8 @@ String getHeaderValue(String header, String headerName) {
   return header.substring(strlen(headerName.c_str()));
 }
 
-// Activation
-bool FirmwareVersionCheck( char *, String );
-void PerformFirmwareOTA( String, const char *, uint );
+//bool FirmwareVersionCheck( char *, String );
+//void PerformFirmwareOTA( String, const char *, uint );
 void NTPConnect();
 void SendLiveData2Cloud();
 void Send10Seconds2Cloud();
@@ -209,7 +209,7 @@ void execOTA() {
   // Connect to S3
   if (net.connect(host.c_str(), port)) {
     // Connection Succeed.
-    // Fecthing the bin
+    // Fetching the bin
     Serial.println("Fetching Bin: " + String(bin));
 
     // Get the contents of the bin file
@@ -330,119 +330,25 @@ void execOTA() {
   }
 }
 
+
+
 // Handle subscribed MQTT topics - Alerts and Sample Rate changes
 void callback(char* topic, byte* payload, unsigned int length) {
-  StaticJsonDocument<100> jsonMQTTReceiveDoc;
+  //StaticJsonDocument<100> jsonMQTTReceiveDoc;
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] : ");
 
-  payload[length] = 0; // ensure valid content is zero terminated so can treat as c-string
-  Serial.println((char *)payload);
-  DeserializationError err = deserializeJson(jsonMQTTReceiveDoc, (char *)payload);
-  if (err) {
-    Serial.print(F("deserializeJson() failed with code : "));
-    Serial.println(err.c_str());
-  } else {
-    JsonObject cmdData = jsonMQTTReceiveDoc.as<JsonObject>();
-    if ( strcmp(topic, MQTT_TOPIC_ALARM) == 0 ) {
-      // {Alarm:[true|test|false]}
-      String AlarmType = cmdData["Alarm"].as<String>() ;
-      Serial.println( "Alarm received: " + AlarmType );
-      if ( AlarmType.equalsIgnoreCase("true") ) {
-        // Sound the Buzzer & Blink the LED RED
-        bStopEarthquakeAlarm = false;
-        EarthquakeAlarm( LED_ERROR);
-        bStopEarthquakeAlarm = false;
-      } else if ( AlarmType.equalsIgnoreCase("test") ) {
-        // Sound the Buzzer & Blink the LED ORANGE
-        bStopEarthquakeAlarm = false;
-        EarthquakeAlarm( LED_ORANGE );
-        bStopEarthquakeAlarm = false;
-      }else if ( AlarmType.equalsIgnoreCase("false") ) {
-        bStopEarthquakeAlarm = true;
-      }
-    } else if ( strcmp(topic, MQTT_TOPIC_FWCHECK) == 0 ) {
-      NeoPixelStatus( LED_FIRMWARE_OTA ); // Firmware OTA - Magenta
-      //OpenEEWDeviceActivation(); 
-      //  Do Firmware Update Here
-    } else if ( strcmp(topic, MQTT_TOPIC_FWUPDATE) == 0 ) {
-      NeoPixelStatus( LED_FIRMWARE_OTA ); // Firmware OTA - Magenta
-      execOTA();
-      
-    } else if ( strcmp(topic, MQTT_TOPIC_SEND10SEC) == 0 ) {
-      // Send 10 seconds of accelerometer history
-      Serial.println("Send 10 seconds of accelerometer history to the cloud");
-      Send10Seconds2Cloud() ;
-    } else if ( strcmp(topic, MQTT_TOPIC_SENDACCEL) == 0 ) {
-      // Start sending live accelometer data to the cloud. The payload asks for n seconds of data
-      numSecsOfAccelReadings = cmdData["LiveDataDuration"].as<uint32_t>();
-      Serial.print("Send live accelometer data to the cloud (secs):");
-      Serial.println( numSecsOfAccelReadings );
-    } else if ( strcmp(topic, MQTT_TOPIC_SAMPLERATE) == 0 ) {
-      // Set the ADXL355 Sample Rate
-      int32_t NewSampleRate = 0;
-      bool    SampleRateChanged = false ;
+  String topicStr = topic;
 
-      NewSampleRate = cmdData["SampleRate"].as<int32_t>(); // this form allows you specify the type of the data you want from the JSON object
-      if( NewSampleRate == 31 ) {
-        // Requested sample rate of 31 is valid
-        Adxl355SampleRate = 31;
-        SampleRateChanged = true;
-        odr_lpf = Adxl355::ODR_LPF::ODR_31_25_AND_7_813;
-      } else if ( NewSampleRate == 125 ) {
-        // Requested sample rate of 125 is valid
-        Adxl355SampleRate = 125;
-        SampleRateChanged = true;
-        odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
-      } else if ( NewSampleRate == 0 ) {
-        // Turn off the sensor ADXL
-        Adxl355SampleRate = 0;
-        SampleRateChanged = false; // false so the code below doesn't restart it
-        Serial.println("Stopping the ADXL355");
-        adxl355.stop();
-        StaLtaQue.flush() ; // flush the Queue
-        strip.clear();  // Off
-        strip.show();
-      } else {
-        // invalid - leave the Sample Rate unchanged
-      }
-
-      Serial.print("ADXL355 Sample Rate has been changed:");
-      Serial.println( Adxl355SampleRate );
-      //SampleRateChanged = false;
-      Serial.println( SampleRateChanged ) ;
-      if( SampleRateChanged ) {
-        Serial.println("Changing the ADXL355 Sample Rate");
-        adxl355.stop();
-        delay(1000);
-        Serial.println("Restarting");
-        StartADXL355();
-        breatheintensity = 1;
-        breathedirection = true;
-      }
-      jsonMQTTReceiveDoc.clear();
-    } else if ( strcmp(topic, MQTT_TOPIC_THRESHOLD) == 0 ) {
-      // Override the `thresh` global
-      char newthreshmsg[50];
-      snprintf( newthreshmsg, 49, "Previous STA/LTA Shake Threshold : %5.2f", thresh);
-      Serial.println(newthreshmsg);
-      thresh = cmdData["ThresholdOverride"].as<double>();
-      snprintf( newthreshmsg, 49, "Override STA/LTA Shake Threshold : %5.2f", thresh);
-      Serial.println(newthreshmsg);
-    } else if ( strcmp(topic, MQTT_TOPIC_FACTORYRST) == 0 ) {
-      // Remote message received to factory reset the device
-      Serial.println("Remote message received to factory reset the device.");
-      clearNetworks();
-      Serial.println("Restarting Device...");
-      esp_restart();
-    } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
-      Serial.println("Restarting Device...");
-      esp_restart();
-    } else {
-      Serial.println("Unknown command received");
-    }
-  }
+  if (topicStr == "/firmwareupdate") 
+    {
+     if(payload[0] == '1'){
+       NeoPixelStatus( LED_FIRMWARE_OTA ); // Firmware OTA - Magenta
+       Serial.print("Firmware update start...");
+       execOTA();  
+       }
+     }
 }
 
 void pubSubErr(int8_t MQTTErr)
@@ -806,7 +712,7 @@ void setup() {
   // Set the time on the ESP32
   NTPConnect();
 
-  char mqttparams[100]; // Allocate a buffer large enough for this string ~95 chars
+  //char mqttparams[100]; // Allocate a buffer large enough for this string ~95 chars
   
   net.setCACert(cacert);
   net.setCertificate(client_cert);
@@ -815,7 +721,7 @@ void setup() {
   client.setServer(MQTT_HOST, MQTT_PORT);
   client.setCallback(callback);
 
-  // Connect to MQTT - IBM Watson IoT Platform
+  // Connect to MQTT
   connectToMqtt();
 
 #if OPENEEW_SAMPLE_RATE_125
