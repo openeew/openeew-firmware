@@ -22,6 +22,8 @@
 // IoT connection details
 const int MQTT_PORT = 8883;
 
+const char MQTT_SUB_TOPIC[] = "mysubtopic";
+
 const char MQTT_TOPIC[] = "iot-2/evt/status/fmt/json"; //waveform data
 const char MQTT_TOPIC_ALARM[] = "iot-2/cmd/earthquake/fmt/json";
 const char MQTT_TOPIC_SAMPLERATE[] = "iot-2/cmd/samplerate/fmt/json";
@@ -34,9 +36,10 @@ const char MQTT_TOPIC_FACTORYRST[] = "iot-2/cmd/factoryreset/fmt/json";
 
 char deviceID[13];
 
-void callback(char* topic, byte* payload, unsigned int length);
+//void messageReceived(char* topic, byte* payload, unsigned int length);
 
 WiFiClientSecure net;
+WiFiClient nethttp;
 PubSubClient client(net);
 
 // OTA
@@ -46,6 +49,10 @@ bool isValidContentType = false;
 String host = S3_FIRMWARE_BUCKET; // Host => bucket-name.s3.region.amazonaws.com
 int port = 80; // Non https. For HTTPS 443. As of today, HTTPS doesn't work.
 String bin = S3_FILE; // bin file name with a slash in front.
+
+//String host = "grillo-firmware.s3.amazonaws.com"; // Host => bucket-name.s3.region.amazonaws.com
+//int port = 80; // Non https. For HTTPS 443. As of today, HTTPS doesn't work.
+//String bin = "/S3_OTA.ino.esp32.bin"; // bin file name with a slash in front.
 
 String getHeaderValue(String header, String headerName) {
   return header.substring(strlen(headerName.c_str()));
@@ -163,8 +170,9 @@ double    sample1ABS  = 0;
 double LTAsample1ABS  = 0;
 double       stav[3]  = { 0, 0, 0 };
 double       ltav[3]  = { 0, 0, 0 };
-// --------------------------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------------------------
+// ADXL
 void IRAM_ATTR isr_adxl() {
   fifoFull = true;
   //fifoCount++;
@@ -203,17 +211,18 @@ void StartADXL355() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); //enable brownout detector
 }
 
+// --------------------------------------------------------------------------------------------
 // OTA Logic 
 void execOTA() {
   Serial.println("Connecting to: " + String(host));
   // Connect to S3
-  if (net.connect(host.c_str(), port)) {
+  if (nethttp.connect(host.c_str(), port)) {
     // Connection Succeed.
     // Fetching the bin
     Serial.println("Fetching Bin: " + String(bin));
 
     // Get the contents of the bin file
-    client.print(String("GET ") + bin + " HTTP/1.1\r\n" +
+    nethttp.print(String("GET ") + bin + " HTTP/1.1\r\n" +
                  "Host: " + host + "\r\n" +
                  "Cache-Control: no-cache\r\n" +
                  "Connection: close\r\n\r\n");
@@ -225,17 +234,17 @@ void execOTA() {
     //                 "Connection: close\r\n\r\n");
 
     unsigned long timeout = millis();
-    while (net.available() == 0) {
+    while (nethttp.available() == 0) {
       if (millis() - timeout > 5000) {
         Serial.println("Client Timeout !");
-        net.stop();
+        nethttp.stop();
         return;
       }
     }
 
-    while (net.available()) {
+    while (nethttp.available()) {
       // read line till /n
-      String line = net.readStringUntil('\n');
+      String line = nethttp.readStringUntil('\n');
       // remove space, to check if the line is end of headers
       line.trim();
 
@@ -296,7 +305,7 @@ void execOTA() {
       Serial.println("Begin OTA. This may take 2 - 5 mins to complete. Things might be quite for a while.. Patience!");
       // No activity would appear on the Serial monitor
       // So be patient. This may take 2 - 5mins to complete
-      size_t written = Update.writeStream(net);
+      size_t written = Update.writeStream(nethttp);
 
       if (written == contentLength) {
         Serial.println("Written : " + String(written) + " successfully");
@@ -322,33 +331,32 @@ void execOTA() {
       // Understand the partitions and
       // space availability
       Serial.println("Not enough space to begin OTA");
-      net.flush();
+      nethttp.flush();
     }
   } else {
     Serial.println("There was no content in the response");
-    net.flush();
+    nethttp.flush();
   }
 }
 
 
 
 // Handle subscribed MQTT topics - Alerts and Sample Rate changes
-void callback(char* topic, byte* payload, unsigned int length) {
-  //StaticJsonDocument<100> jsonMQTTReceiveDoc;
-  Serial.print("Message arrived [");
+void messageReceived(char *topic, byte *payload, unsigned int length)
+{
+  Serial.print("Received [");
   Serial.print(topic);
-  Serial.print("] : ");
-
-  String topicStr = topic;
-
-  if (topicStr == "/firmwareupdate") 
-    {
-     if(payload[0] == '1'){
+  Serial.print("]: ");
+  for (int i = 0; i < length; i++)
+  {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+  if(payload[0] == '1'){
        NeoPixelStatus( LED_FIRMWARE_OTA ); // Firmware OTA - Magenta
        Serial.print("Firmware update start...");
        execOTA();  
        }
-     }
 }
 
 void pubSubErr(int8_t MQTTErr)
@@ -383,8 +391,8 @@ void connectToMqtt(bool nonBlocking = false)
     if (client.connect(deviceID))
     {
       Serial.println("connected!");
-      //if (!client.subscribe(MQTT_SUB_TOPIC))
-        //pubSubErr(client.state());
+      if (!client.subscribe(MQTT_SUB_TOPIC))
+        pubSubErr(client.state());
     }
     else
     {
@@ -719,7 +727,7 @@ void setup() {
   net.setPrivateKey(privkey);
 
   client.setServer(MQTT_HOST, MQTT_PORT);
-  client.setCallback(callback);
+  client.setCallback(messageReceived);
 
   // Connect to MQTT
   connectToMqtt();
