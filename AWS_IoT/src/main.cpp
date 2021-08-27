@@ -22,7 +22,8 @@
 // IoT connection details
 const int MQTT_PORT = 8883;
 
-const char MQTT_TOPIC[] = "$aws/rules/waveform/haiti"; //waveform data
+const char MQTT_TOPIC[] = "waveform/haiti"; //waveform data
+//const char MQTT_TOPIC[] = "$aws/rules/waveform/haiti"; //waveform data
 const char MQTT_TOPIC_ALARM[] = "iot-2/cmd/earthquake/fmt/json";
 const char MQTT_TOPIC_SAMPLERATE[] = "iot-2/cmd/samplerate/fmt/json";
 const char MQTT_TOPIC_FWCHECK[] = "iot-2/cmd/firmwarecheck/fmt/json";
@@ -225,12 +226,6 @@ void execOTA() {
                  "Cache-Control: no-cache\r\n" +
                  "Connection: close\r\n\r\n");
 
-    // Check what is being sent
-    //    Serial.print(String("GET ") + bin + " HTTP/1.1\r\n" +
-    //                 "Host: " + host + "\r\n" +
-    //                 "Cache-Control: no-cache\r\n" +
-    //                 "Connection: close\r\n\r\n");
-
     unsigned long timeout = millis();
     while (nethttp.available() == 0) {
       if (millis() - timeout > 5000) {
@@ -241,38 +236,23 @@ void execOTA() {
     }
 
     while (nethttp.available()) {
-      // read line till /n
       String line = nethttp.readStringUntil('\n');
-      // remove space, to check if the line is end of headers
       line.trim();
 
-      // if the the line is empty,
-      // this is end of headers
-      // break the while and feed the
-      // remaining `client` to the
-      // Update.writeStream();
       if (!line.length()) {
         //headers ended
         break; // and get the OTA started
       }
-
-      // Check if the HTTP Response is 200
-      // else break and Exit Update
       if (line.startsWith("HTTP/1.1")) {
         if (line.indexOf("200") < 0) {
           Serial.println("Got a non 200 status code from server. Exiting OTA Update.");
           break;
         }
       }
-
-      // extract headers here
-      // Start with content length
       if (line.startsWith("Content-Length: ")) {
         contentLength = atol((getHeaderValue(line, "Content-Length: ")).c_str());
         Serial.println("Got " + String(contentLength) + " bytes from server");
       }
-
-      // Next, the content type
       if (line.startsWith("Content-Type: ")) {
         String contentType = getHeaderValue(line, "Content-Type: ");
         Serial.println("Got " + contentType + " payload.");
@@ -282,29 +262,20 @@ void execOTA() {
       }
     }
   } else {
-    // Connect to S3 failed
-    // May be try?
-    // Probably a choppy network?
     Serial.println("Connection to " + String(host) + " failed. Please check your setup");
     // retry??
     // execOTA();
   }
-
   // Check what is the contentLength and if content type is `application/octet-stream`
   Serial.println("contentLength : " + String(contentLength) + ", isValidContentType : " + String(isValidContentType));
-
   // check contentLength and content type
   if (contentLength && isValidContentType) {
     // Check if there is enough to OTA Update
     bool canBegin = Update.begin(contentLength);
-
     // If yes, begin
     if (canBegin) {
       Serial.println("Begin OTA. This may take 2 - 5 mins to complete. Things might be quite for a while.. Patience!");
-      // No activity would appear on the Serial monitor
-      // So be patient. This may take 2 - 5mins to complete
       size_t written = Update.writeStream(nethttp);
-
       if (written == contentLength) {
         Serial.println("Written : " + String(written) + " successfully");
       } else {
@@ -325,9 +296,6 @@ void execOTA() {
         Serial.println("Error Occurred. Error #: " + String(Update.getError()));
       }
     } else {
-      // not enough space to begin OTA
-      // Understand the partitions and
-      // space availability
       Serial.println("Not enough space to begin OTA");
       nethttp.flush();
     }
@@ -336,8 +304,6 @@ void execOTA() {
     nethttp.flush();
   }
 }
-
-
 
 // Handle subscribed MQTT topics - Alerts and Sample Rate changes
 void messageReceived(char *topic, byte *payload, unsigned int length)
@@ -484,10 +450,9 @@ void Connect2MQTTbroker() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
     NeoPixelStatus( LED_CONNECT_CLOUD ); // blink cyan
-    // Attempt to connect / re-connect to IBM Watson IoT Platform
+    // Attempt to connect / re-connect to IoT
     // These params are globals assigned in setup()
     if( client.connect(deviceID) ) {
-  //if( mqtt.connect(MQTT_DEVICEID) ) { // No Token Authentication
       Serial.println("MQTT Connected");
       client.subscribe(MQTT_TOPIC_ALARM);
       client.subscribe(MQTT_TOPIC_SAMPLERATE);
@@ -731,12 +696,8 @@ void connectToWiFi(String init_str)
     Serial.println("ok!");
 }
 
-
-
 unsigned long previousMillis = 0;
 const long interval = 5000;
-
-
 
 void checkWiFiThenReboot(void)
 {
@@ -802,8 +763,10 @@ void setup() {
     }
   }
 
-  WiFi.mode(WIFI_STA);
-  bWiFiConnected = WiFiScanAndConnect();
+  // If Eth is not aviailable, try Smartconfig
+  if ( !bWiFiConnected && !bEthConnected) {
+     WiFi.mode(WIFI_STA);
+     bWiFiConnected = WiFiScanAndConnect();
   if( !bWiFiConnected )  {
     // If the sensor has been registered in the past
     // at least one WiFi network will have been stored in NVM
@@ -820,21 +783,24 @@ void setup() {
   } else {
     Serial.println("WiFi Connected");
   }
+  }
+
+
+
 
   byte mac[6];                     // the MAC address of your Wifi shield
   WiFi.macAddress(mac);
-
   // Output this ESP32 Unique WiFi MAC Address
   Serial.print("WiFi MAC: ");
   Serial.println(WiFi.macAddress());
-
   // Use the reverse octet Mac Address as the MQTT deviceID
   snprintf(deviceID,13,"%02X%02X%02X%02X%02X%02X",mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
   Serial.println(deviceID);
   WiFi.setHostname(deviceID);
 
   // Set the time on the ESP32
-  NTPConnect();
+  //NTPConnect();
+  SetTimeESP32();
 
   //char mqttparams[100]; // Allocate a buffer large enough for this string ~95 chars
   
@@ -1231,10 +1197,10 @@ bool startSmartConfig()
   Serial.print("Waiting for SmartConfig or Router to restart" );
   while( !WiFi.smartConfigDone() ) {
     delay(500);
-    Serial.print("Waiting for SmartConfig or WiFi Router to recover (10 minutes ~ 650 ticks): " );
+    Serial.print("Waiting for SmartConfig or WiFi Router to recover (20 ticks): " );
     Serial.println( RouterDownTimeOut );
     NeoPixelStatus( LED_LISTEN_WIFI );  // blink blue
-    if( RouterDownTimeOut < 650 ) {
+    if( RouterDownTimeOut < 20 ) {
       RouterDownTimeOut++;
     } else if( !numNetworksStored() ) {
       // There are no stored WiFi network credentials, keep waiting
