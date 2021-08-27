@@ -22,9 +22,7 @@
 // IoT connection details
 const int MQTT_PORT = 8883;
 
-const char MQTT_SUB_TOPIC[] = "mysubtopic";
-
-const char MQTT_TOPIC[] = "iot-2/evt/status/fmt/json"; //waveform data
+const char MQTT_TOPIC[] = "$aws/rules/waveform/haiti"; //waveform data
 const char MQTT_TOPIC_ALARM[] = "iot-2/cmd/earthquake/fmt/json";
 const char MQTT_TOPIC_SAMPLERATE[] = "iot-2/cmd/samplerate/fmt/json";
 const char MQTT_TOPIC_FWCHECK[] = "iot-2/cmd/firmwarecheck/fmt/json";
@@ -35,6 +33,10 @@ const char MQTT_TOPIC_THRESHOLD[] = "iot-2/cmd/threshold/fmt/json";
 const char MQTT_TOPIC_FACTORYRST[] = "iot-2/cmd/factoryreset/fmt/json";
 
 char deviceID[13];
+
+// Timezone info
+#define TZ_OFFSET 0  // (EST) Hours timezone offset to GMT (without daylight saving time)
+#define TZ_DST    0  // Minutes timezone offset for Daylight saving
 
 //void messageReceived(char* topic, byte* payload, unsigned int length);
 
@@ -340,19 +342,114 @@ void execOTA() {
 // Handle subscribed MQTT topics - Alerts and Sample Rate changes
 void messageReceived(char *topic, byte *payload, unsigned int length)
 {
-  Serial.print("Received [");
+  StaticJsonDocument<100> jsonMQTTReceiveDoc;
+  Serial.print("Message arrived [");
   Serial.print(topic);
-  Serial.print("]: ");
-  for (int i = 0; i < length; i++)
-  {
-    Serial.print((char)payload[i]);
+  Serial.print("] : ");
+
+  payload[length] = 0; // ensure valid content is zero terminated so can treat as c-string
+  Serial.println((char *)payload);
+  DeserializationError err = deserializeJson(jsonMQTTReceiveDoc, (char *)payload);
+  if (err) {
+    Serial.print(F("deserializeJson() failed with code : "));
+    Serial.println(err.c_str());
+  } else {
+    JsonObject cmdData = jsonMQTTReceiveDoc.as<JsonObject>();
+    if ( strcmp(topic, MQTT_TOPIC_ALARM) == 0 ) {
+      // {Alarm:[true|test|false]}
+      String AlarmType = cmdData["Alarm"].as<String>() ;
+      Serial.println( "Alarm received: " + AlarmType );
+      if ( AlarmType.equalsIgnoreCase("true") ) {
+        // Sound the Buzzer & Blink the LED RED
+        bStopEarthquakeAlarm = false;
+        EarthquakeAlarm( LED_ERROR);
+        bStopEarthquakeAlarm = false;
+      } else if ( AlarmType.equalsIgnoreCase("test") ) {
+        // Sound the Buzzer & Blink the LED ORANGE
+        bStopEarthquakeAlarm = false;
+        EarthquakeAlarm( LED_ORANGE );
+        bStopEarthquakeAlarm = false;
+      }else if ( AlarmType.equalsIgnoreCase("false") ) {
+        bStopEarthquakeAlarm = true;
+      }
+    } else if ( strcmp(topic, MQTT_TOPIC_FWCHECK) == 0 ) {
+      //Do OTA
+      NeoPixelStatus( LED_FIRMWARE_OTA ); // Firmware OTA - Magenta
+      execOTA();
+      
+    } else if ( strcmp(topic, MQTT_TOPIC_SEND10SEC) == 0 ) {
+      // Send 10 seconds of accelerometer history
+      Serial.println("Send 10 seconds of accelerometer history to the cloud");
+      Send10Seconds2Cloud() ;
+    } else if ( strcmp(topic, MQTT_TOPIC_SENDACCEL) == 0 ) {
+      // Start sending live accelometer data to the cloud. The payload asks for n seconds of data
+      numSecsOfAccelReadings = cmdData["LiveDataDuration"].as<uint32_t>();
+      Serial.print("Send live accelometer data to the cloud (secs):");
+      Serial.println( numSecsOfAccelReadings );
+    } else if ( strcmp(topic, MQTT_TOPIC_SAMPLERATE) == 0 ) {
+      // Set the ADXL355 Sample Rate
+      int32_t NewSampleRate = 0;
+      bool    SampleRateChanged = false ;
+
+      NewSampleRate = cmdData["SampleRate"].as<int32_t>(); // this form allows you specify the type of the data you want from the JSON object
+      if( NewSampleRate == 31 ) {
+        // Requested sample rate of 31 is valid
+        Adxl355SampleRate = 31;
+        SampleRateChanged = true;
+        odr_lpf = Adxl355::ODR_LPF::ODR_31_25_AND_7_813;
+      } else if ( NewSampleRate == 125 ) {
+        // Requested sample rate of 125 is valid
+        Adxl355SampleRate = 125;
+        SampleRateChanged = true;
+        odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
+      } else if ( NewSampleRate == 0 ) {
+        // Turn off the sensor ADXL
+        Adxl355SampleRate = 0;
+        SampleRateChanged = false; // false so the code below doesn't restart it
+        Serial.println("Stopping the ADXL355");
+        adxl355.stop();
+        StaLtaQue.flush() ; // flush the Queue
+        strip.clear();  // Off
+        strip.show();
+      } else {
+        // invalid - leave the Sample Rate unchanged
+      }
+
+      Serial.print("ADXL355 Sample Rate has been changed:");
+      Serial.println( Adxl355SampleRate );
+      //SampleRateChanged = false;
+      Serial.println( SampleRateChanged ) ;
+      if( SampleRateChanged ) {
+        Serial.println("Changing the ADXL355 Sample Rate");
+        adxl355.stop();
+        delay(1000);
+        Serial.println("Restarting");
+        StartADXL355();
+        breatheintensity = 1;
+        breathedirection = true;
+      }
+      jsonMQTTReceiveDoc.clear();
+    } else if ( strcmp(topic, MQTT_TOPIC_THRESHOLD) == 0 ) {
+      // Override the `thresh` global
+      char newthreshmsg[50];
+      snprintf( newthreshmsg, 49, "Previous STA/LTA Shake Threshold : %5.2f", thresh);
+      Serial.println(newthreshmsg);
+      thresh = cmdData["ThresholdOverride"].as<double>();
+      snprintf( newthreshmsg, 49, "Override STA/LTA Shake Threshold : %5.2f", thresh);
+      Serial.println(newthreshmsg);
+    } else if ( strcmp(topic, MQTT_TOPIC_FACTORYRST) == 0 ) {
+      // Remote message received to factory reset the device
+      Serial.println("Remote message received to factory reset the device.");
+      clearNetworks();
+      Serial.println("Restarting Device...");
+      esp_restart();
+    } else if ( strcmp(topic, MQTT_TOPIC_RESTART) == 0 ) {
+      Serial.println("Restarting Device...");
+      esp_restart();
+    } else {
+      Serial.println("Unknown command received");
+    }
   }
-  Serial.println();
-  if(payload[0] == '1'){
-       NeoPixelStatus( LED_FIRMWARE_OTA ); // Firmware OTA - Magenta
-       Serial.print("Firmware update start...");
-       execOTA();  
-       }
 }
 
 void pubSubErr(int8_t MQTTErr)
@@ -379,33 +476,33 @@ void pubSubErr(int8_t MQTTErr)
     Serial.print("Connect unauthorized");
 }
 
-void connectToMqtt(bool nonBlocking = false)
-{
-  Serial.print("MQTT connecting ");
-  while (!client.connected())
-  {
-    if (client.connect(deviceID))
-    {
-      Serial.println("connected!");
-      if (!client.subscribe(MQTT_SUB_TOPIC))
-        pubSubErr(client.state());
+void Connect2MQTTbroker() {
+  if( bNetworkInterfaceChanged ) {
+    client.disconnect();
+    bNetworkInterfaceChanged = false;
+  }
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    NeoPixelStatus( LED_CONNECT_CLOUD ); // blink cyan
+    // Attempt to connect / re-connect to IBM Watson IoT Platform
+    // These params are globals assigned in setup()
+    if( client.connect(deviceID) ) {
+  //if( mqtt.connect(MQTT_DEVICEID) ) { // No Token Authentication
+      Serial.println("MQTT Connected");
+      client.subscribe(MQTT_TOPIC_ALARM);
+      client.subscribe(MQTT_TOPIC_SAMPLERATE);
+      client.subscribe(MQTT_TOPIC_FWCHECK);
+      client.subscribe(MQTT_TOPIC_SEND10SEC);
+      client.subscribe(MQTT_TOPIC_SENDACCEL);
+      client.subscribe(MQTT_TOPIC_RESTART);
+      client.subscribe(MQTT_TOPIC_THRESHOLD);
+      client.subscribe(MQTT_TOPIC_FACTORYRST);
+      client.setBufferSize(2000);
+      client.loop();
+    } else {
+      Serial.println("MQTT Failed to connect!");
+      delay(5000);
     }
-    else
-    {
-      Serial.print("failed, reason -> ");
-      pubSubErr(client.state());
-      if (!nonBlocking)
-      {
-        Serial.println(" < try again in 5 seconds");
-        delay(5000);
-      }
-      else
-      {
-        Serial.println(" <");
-      }
-    }
-    if (nonBlocking)
-      break;
   }
 }
 
@@ -634,23 +731,12 @@ void connectToWiFi(String init_str)
     Serial.println("ok!");
 }
 
-void checkWiFiThenMQTT(void)
-{
-  connectToWiFi("Checking WiFi");
-  connectToMqtt();
-}
+
 
 unsigned long previousMillis = 0;
 const long interval = 5000;
 
-void checkWiFiThenMQTTNonBlocking(void)
-{
-  connectToWiFi(emptyString);
-  if (millis() - previousMillis >= interval && !client.connected()) {
-    previousMillis = millis();
-    connectToMqtt(true);
-  }
-}
+
 
 void checkWiFiThenReboot(void)
 {
@@ -659,6 +745,37 @@ void checkWiFiThenReboot(void)
   ESP.restart();
 }
 
+time_t periodic_timesync;
+// MQTT SSL requires a relatively accurate time between broker and client
+void SetTimeESP32() {
+  time_t now = time(nullptr);
+  Serial.print("Before time sync: ");
+  Serial.print(ctime(&now));
+
+  // Set time from NTP servers
+  configTime(TZ_OFFSET * 3600, TZ_DST * 60, "time.nist.gov", "pool.ntp.org");
+  Serial.print("Waiting for time");
+  while(time(nullptr) <= 100000) {
+    NeoPixelStatus( LED_FIRMWARE_DFU ); // blink yellow
+    Serial.print(".");
+    delay(100);
+  }
+  unsigned timeout = 5000;
+  unsigned start = millis();
+  while (millis() - start < timeout) {
+      now = time(nullptr);
+      if (now > (2019 - 1970) * 365 * 24 * 3600) {
+          break;
+      }
+      delay(100);
+  }
+  delay(1000); // Wait for time to fully sync
+
+  Serial.print("\nAfter time sync : ");
+  now = time(nullptr);
+  Serial.print(ctime(&now));
+  periodic_timesync = now;     // periodically resync the time to prevent drift
+}
 
 
 
@@ -667,10 +784,13 @@ void setup() {
   Serial.begin(115200);
   delay(5000);
   Serial.println();
-  Serial.println(); 
+  Serial.println();
 
   NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
   strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
+
+  // Start Network connections
+  WiFi.onEvent(NetworkEvent);
 
   // Start the ETH interface, if it is available, before WiFi
   ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
@@ -726,7 +846,8 @@ void setup() {
   client.setCallback(messageReceived);
 
   // Connect to MQTT
-  connectToMqtt();
+  Connect2MQTTbroker();
+  //connectToMqtt();
 
 #if OPENEEW_SAMPLE_RATE_125
   odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
@@ -753,6 +874,8 @@ void setup() {
 
 void loop() {
 
+  /*
+
   now = time(nullptr);  
   if (!client.connected())
   {
@@ -763,6 +886,12 @@ void loop() {
   else
   {
     client.loop();
+
+    */
+  
+  client.loop();
+  // Confirm Connection to MQTT - IBM Watson IoT Platform
+  Connect2MQTTbroker();
 
   //====================== ADXL Accelerometer =====================
   if (fifoFull)  {
@@ -935,10 +1064,14 @@ void loop() {
     //Serial.println( xPortGetFreeHeapSize() );
     }
   }
-   }
 
   if( adxstatus )
     NeoPixelBreathe();
+
+  if( (time(nullptr) - periodic_timesync) > RESYNCTIME ) {
+    // Resync the ESP32 time once a day so that MQTT and Seismology time is accurate
+    SetTimeESP32();
+  }
 
   delay(10);
 }
