@@ -22,7 +22,7 @@
 // IoT connection details
 const int MQTT_PORT = 8883;
 
-const char MQTT_TOPIC[] = "iot-2/evt/status/fmt/json";
+const char MQTT_TOPIC[] = "iot-2/evt/status/fmt/json"; //waveform data
 const char MQTT_TOPIC_ALARM[] = "iot-2/cmd/earthquake/fmt/json";
 const char MQTT_TOPIC_SAMPLERATE[] = "iot-2/cmd/samplerate/fmt/json";
 const char MQTT_TOPIC_FWCHECK[] = "iot-2/cmd/firmwarecheck/fmt/json";
