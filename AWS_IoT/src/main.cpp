@@ -1262,10 +1262,10 @@ bool startSmartConfig()
   Serial.print("Waiting for SmartConfig or Router to restart" );
   while( !WiFi.smartConfigDone() ) {
     delay(500);
-    Serial.print("Waiting for SmartConfig or WiFi Router to recover (20 ticks): " );
+    Serial.print("Waiting for SmartConfig or WiFi Router to recover (500 ticks): " );
     Serial.println( RouterDownTimeOut );
     NeoPixelStatus( LED_LISTEN_WIFI );  // blink blue
-    if( RouterDownTimeOut < 20 ) {
+    if( RouterDownTimeOut < 500 ) {
       RouterDownTimeOut++;
     } else if( !numNetworksStored() ) {
       // There are no stored WiFi network credentials, keep waiting
