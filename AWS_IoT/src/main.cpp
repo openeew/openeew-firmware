@@ -22,8 +22,8 @@
 // IoT connection details
 const int MQTT_PORT = 8883;
 
-const char MQTT_TOPIC[] = "waveform/haiti"; //waveform data
-//const char MQTT_TOPIC[] = "$aws/rules/waveform/haiti"; //waveform data
+//const char MQTT_TOPIC[] = "waveform/haiti/"; //waveform data
+const char MQTT_TOPIC[] = "$aws/rules/waveform/haiti"; //waveform data
 const char MQTT_TOPIC_ALARM[] = "iot-2/cmd/earthquake/fmt/json";
 const char MQTT_TOPIC_SAMPLERATE[] = "iot-2/cmd/samplerate/fmt/json";
 const char MQTT_TOPIC_FWCHECK[] = "iot-2/cmd/firmwarecheck/fmt/json";
@@ -442,6 +442,94 @@ void pubSubErr(int8_t MQTTErr)
     Serial.print("Connect unauthorized");
 }
 
+void connectToMqtt(bool nonBlocking = false)
+{
+  Serial.print("MQTT connecting ");
+  while (!client.connected())
+  {
+    if (client.connect(deviceID))
+    {
+      Serial.println("connected!");
+      if (!client.subscribe(MQTT_TOPIC_ALARM))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_SAMPLERATE))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_FWCHECK))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_SEND10SEC))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_SENDACCEL))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_RESTART))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_THRESHOLD))
+        pubSubErr(client.state());
+        if (!client.subscribe(MQTT_TOPIC_FACTORYRST))
+        pubSubErr(client.state());
+    }
+    else
+    {
+      Serial.print("failed, reason -> ");
+      pubSubErr(client.state());
+      if (!nonBlocking)
+      {
+        Serial.println(" < try again in 5 seconds");
+        delay(5000);
+      }
+      else
+      {
+        Serial.println(" <");
+      }
+    }
+    if (nonBlocking)
+      break;
+  }
+}
+
+void connectToWiFi(String init_str)
+{
+  if (bEthConnected) {
+    return;
+  }
+  
+  if (init_str != emptyString)
+    Serial.print(init_str);
+
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(1000);
+  }
+  if (init_str != emptyString)
+    Serial.println("ok!");
+}
+
+void checkWiFiThenMQTT(void)
+{
+  connectToWiFi("Checking WiFi");
+  connectToMqtt();
+}
+
+unsigned long previousMillis = 0;
+const long interval = 5000;
+
+void checkWiFiThenMQTTNonBlocking(void)
+{
+  connectToWiFi(emptyString);
+  if (millis() - previousMillis >= interval && !client.connected()) {
+    previousMillis = millis();
+    connectToMqtt(true);
+  }
+}
+
+void checkWiFiThenReboot(void)
+{
+  connectToWiFi("Checking WiFi");
+  Serial.print("Rebooting");
+  ESP.restart();
+}
+
 void Connect2MQTTbroker() {
   if( bNetworkInterfaceChanged ) {
     client.disconnect();
@@ -470,6 +558,8 @@ void Connect2MQTTbroker() {
     }
   }
 }
+
+
 
 void Send10Seconds2Cloud() {
   // DynamicJsonDocument is stored on the heap
@@ -683,28 +773,6 @@ void NTPConnect(void)
   Serial.print(asctime(&timeinfo));
 }
 
-void connectToWiFi(String init_str)
-{
-  if (init_str != emptyString)
-    Serial.print(init_str);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(1000);
-  }
-  if (init_str != emptyString)
-    Serial.println("ok!");
-}
-
-unsigned long previousMillis = 0;
-const long interval = 5000;
-
-void checkWiFiThenReboot(void)
-{
-  connectToWiFi("Checking WiFi");
-  Serial.print("Rebooting");
-  ESP.restart();
-}
 
 time_t periodic_timesync;
 // MQTT SSL requires a relatively accurate time between broker and client
@@ -786,8 +854,6 @@ void setup() {
   }
 
 
-
-
   byte mac[6];                     // the MAC address of your Wifi shield
   WiFi.macAddress(mac);
   // Output this ESP32 Unique WiFi MAC Address
@@ -812,8 +878,9 @@ void setup() {
   client.setCallback(messageReceived);
 
   // Connect to MQTT
-  Connect2MQTTbroker();
-  //connectToMqtt();
+  
+  //Connect2MQTTbroker();
+  connectToMqtt();
 
 #if OPENEEW_SAMPLE_RATE_125
   odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
@@ -840,9 +907,9 @@ void setup() {
 
 void loop() {
 
-  /*
+  
 
-  now = time(nullptr);  
+  //now = time(nullptr);  
   if (!client.connected())
   {
     checkWiFiThenMQTT();
@@ -851,13 +918,10 @@ void loop() {
   }
   else
   {
-    client.loop();
+    client.loop(); 
 
-    */
-  
-  client.loop();
   // Confirm Connection to MQTT - IBM Watson IoT Platform
-  Connect2MQTTbroker();
+  //Connect2MQTTbroker();
 
   //====================== ADXL Accelerometer =====================
   if (fifoFull)  {
@@ -1040,6 +1104,7 @@ void loop() {
   }
 
   delay(10);
+}
 }
 
 
