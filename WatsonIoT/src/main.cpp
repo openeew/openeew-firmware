@@ -827,9 +827,16 @@ void setup() {
   ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
   delay(5000);
   if( bEthConnecting ) {
-    while( !bEthConnected ) {
+    uint EthTimeOut = 20;
+    while( !bEthConnected && EthTimeOut ) {
       Serial.println("Waiting for Ethernet to start...");
+      // Wait for 10 seconds for Ethernet to start
+      // ESP32 does not work with some older 10/100 Ethernet switches
+      EthTimeOut--;
       delay( 500 );
+    }
+    if( EthTimeOut == 0 ) {
+      Serial.println("Ethernet interface did not return an IP address within 10 seconds. Skipping.");
     }
   }
 
