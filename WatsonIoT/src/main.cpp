@@ -69,7 +69,8 @@ PubSubClient mqtt(MQTT_HOST, MQTT_PORT, callback, wifiClient);
 bool OpenEEWDeviceActivation();
 bool FirmwareVersionCheck( char *, String );
 void PerformFirmwareOTA( String, const char *, uint );
-void SetTimeESP32();
+void SetTimeESP32(void*);
+int* dummySetTimeESP32;
 void SendLiveData2Cloud();
 void Send10Seconds2Cloud();
 
@@ -201,6 +202,8 @@ double LTAsample1ABS  = 0;
 double       stav[3]  = { 0, 0, 0 };
 double       ltav[3]  = { 0, 0, 0 };
 
+// Pin Task of NTP to core 0
+TaskHandle_t Task1;
 
 // --------------------------------------------------------------------------------------------
 void IRAM_ATTR isr_adxl() {
@@ -781,7 +784,7 @@ void NetworkEvent(WiFiEvent_t event) {
 
 time_t periodic_timesync;
 // MQTT SSL requires a relatively accurate time between broker and client
-void SetTimeESP32() {
+void SetTimeESP32(void*) {
   time_t now = time(nullptr);
   Serial.print("Before time sync: ");
   Serial.print(ctime(&now));
@@ -819,6 +822,18 @@ void setup() {
   while (!Serial) { }
   Serial.println();
   Serial.println("OpenEEW Sensor Application");
+
+  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
+  xTaskCreatePinnedToCore(
+                    SetTimeESP32,   /* Task function. */
+                    "Task1",     /* name of task. */
+                    10000,       /* Stack size of task */
+                    NULL,        /* parameter of the task */
+                    1,           /* priority of the task */
+                    &Task1,      /* Task handle to keep track of created task */
+                    0);          /* pin task to core 0 */
+  delay(500);
+
 
   // Starting the ESP with the LEDs on can cause brownouts
   NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
@@ -869,7 +884,7 @@ void setup() {
   Serial.println(deviceID);
 
   // Set the time on the ESP32
-  SetTimeESP32();
+  SetTimeESP32(dummySetTimeESP32);
 
   // Call the Activation endpoint to retrieve this OpenEEW Sensor details
   while( ! OpenEEWDeviceActivation() ) {
@@ -1104,7 +1119,7 @@ void loop() {
 
   if( (time(nullptr) - periodic_timesync) > RESYNCTIME ) {
     // Resync the ESP32 time once a day so that MQTT and Seismology time is accurate
-    SetTimeESP32();
+    SetTimeESP32(dummySetTimeESP32);
   }
 
   delay(10);
