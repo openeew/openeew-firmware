@@ -18,6 +18,10 @@
 #include "soc/soc.h"            // Enable/Disable BrownOut detection
 #include "soc/rtc_cntl_reg.h"
 
+// ESPNtpClient Required
+#include <Arduino.h>
+#include <ESPNtpClient.h>
+
 // Watson IoT connection details
 static char MQTT_HOST[48];            // ORGID.messaging.internetofthings.ibmcloud.com
 static char MQTT_DEVICEID[30];        // Allocate a buffer large enough for "d:orgid:devicetype:deviceid"
