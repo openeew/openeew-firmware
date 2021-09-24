@@ -3,9 +3,13 @@ The OpenEEW sensor features a high performance MEMS accelerometer and Ethernet o
 
 ## Firmware
 
-[This code](https://github.com/openeew/openeew-firmware/tree/master/) allows an ESP32 device to send 3 axis accelerometer readings to a remote MQTT endpoint from its accelerometer to an MQTT endpoint. Optionally it also allows an attached NEO-6m GPS module to attach accurate time via the PPS signal (Pulse Per Second).
+[This code](https://github.com/openeew/openeew-firmware/tree/master/) allows an ESP32 device to send 3 axis accelerometer readings to a remote MQTT endpoint from its accelerometer to an MQTT endpoint.
 
-For more details please review the [firmware instructions](https://github.com/openeew/openeew-firmware/blob/master/WatsonIoT/README.md).
+We have provided 2 versions for convenience depending on your infrastructure:
+- [AWS](https://github.com/openeew/openeew-firmware/tree/main/AWS_IoT)
+- [Watson IBM](https://github.com/openeew/openeew-firmware/tree/main/WatsonIoT)
+- [Local MQTT Broker](https://github.com/openeew/openeew-firmware/tree/main/localnet)
+
 
 Learn more about using [MQTT to communicate with the firmware](FIRMWARE.md)
 
