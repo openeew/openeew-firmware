@@ -3,7 +3,7 @@ The OpenEEW sensor features a high performance MEMS accelerometer and Ethernet o
 
 ## Firmware
 
-[This code](https://github.com/openeew/openeew-firmware/tree/master/) allows an ESP32 device to send 3 axis accelerometer readings to a remote MQTT endpoint from its accelerometer to an MQTT endpoint.
+This code allows an ESP32 device to send 3 axis accelerometer readings to a remote MQTT endpoint from its accelerometer to an MQTT endpoint.
 
 We have provided 2 versions for convenience depending on your infrastructure:
 - [AWS](https://github.com/openeew/openeew-firmware/tree/main/AWS_IoT)
