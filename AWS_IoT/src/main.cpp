@@ -18,22 +18,39 @@
 #include "soc/soc.h"            // Enable/Disable BrownOut detection
 #include "soc/rtc_cntl_reg.h"
 
+//NTP Libs
+// ESPNtpClient Required
+#include <Arduino.h>
+#include <ESPNtpClient.h>
+char *payloadTimeDate;
 
-// IoT connection details
+#define SHOW_TIME_PERIOD 1000
+#define NTP_TIMEOUT 1500
+
+const PROGMEM char* ntpServer = "pool.ntp.org";
+
+boolean syncEventTriggered = false; // True if a time even has been triggered
+NTPEvent_t ntpEvent; // Last triggered event
+double ntpOffset;
+double ntpTimeDelay;
+void setTimeESP32();
+
+// MQTT connection details
 const int MQTT_PORT = 8883;
 
-//const char MQTT_TOPIC[] = "waveform/haiti/"; //waveform data
-const char MQTT_TOPIC[] = "$aws/rules/waveform/haiti"; //waveform data
-const char MQTT_TOPIC_ALARM[] = "iot-2/cmd/earthquake/fmt/json";
-const char MQTT_TOPIC_SAMPLERATE[] = "iot-2/cmd/samplerate/fmt/json";
-const char MQTT_TOPIC_FWCHECK[] = "iot-2/cmd/firmwarecheck/fmt/json";
-const char MQTT_TOPIC_SEND10SEC[] = "iot-2/cmd/10secondhistory/fmt/json";
-const char MQTT_TOPIC_SENDACCEL[] = "iot-2/cmd/sendacceldata/fmt/json";
-const char MQTT_TOPIC_RESTART[] = "iot-2/cmd/forcerestart/fmt/json";
-const char MQTT_TOPIC_THRESHOLD[] = "iot-2/cmd/threshold/fmt/json";
-const char MQTT_TOPIC_FACTORYRST[] = "iot-2/cmd/factoryreset/fmt/json";
-
 char deviceID[13];
+
+const char MQTT_TOPIC[] = "$aws/rules/waveform/"; //waveform data
+const char MQTT_TOPIC_ALARM[] = "cmd/earthquake";
+const char MQTT_TOPIC_SAMPLERATE[] = "cmd/samplerate";
+const char MQTT_TOPIC_FWCHECK[] = "cmd/firmwarecheck";
+const char MQTT_TOPIC_SEND10SEC[] = "cmd/10secondhistory";
+const char MQTT_TOPIC_SENDACCEL[] = "cmd/sendacceldata";
+const char MQTT_TOPIC_RESTART[] = "cmd/forcerestart";
+const char MQTT_TOPIC_THRESHOLD[] = "cmd/threshold";
+const char MQTT_TOPIC_FACTORYRST[] = "cmd/factoryreset";
+const char MQTT_TOPIC_STALTAMODE[] = "cmd/staltamode";
+std::string slash = "/";
 
 // Timezone info
 #define TZ_OFFSET 0  // (EST) Hours timezone offset to GMT (without daylight saving time)
@@ -45,6 +62,7 @@ WiFiClientSecure net;
 WiFiClient nethttp;
 PubSubClient client(net);
 
+// --------------------------------------------------------------------------------------------
 // OTA
 long contentLength = 0; // response from S3
 bool isValidContentType = false;
@@ -101,6 +119,7 @@ int  fifoCount = 0;
 int STA_len = 32;    // can change to 125
 int LTA_len = 320;   // can change to 1250
 int QUE_len = LTA_len + STA_len;
+bool STALTAMODE = false;
 
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
@@ -128,7 +147,7 @@ bool startSmartConfig();
 #define LED_COUNT 3
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 void NeoPixelStatus( int );
-void NeoPixelBreathe();
+void NeoPixelBreathe( int );
 bool breathedirection = true;
 int  breatheintensity = 1;
 
@@ -274,7 +293,7 @@ void execOTA() {
     bool canBegin = Update.begin(contentLength);
     // If yes, begin
     if (canBegin) {
-      Serial.println("Begin OTA. This may take 2 - 5 mins to complete. Things might be quite for a while.. Patience!");
+      Serial.println("Begin OTA. This may take 2 - 5 mins to complete. Things might be quiet for a while.. Patience!");
       size_t written = Update.writeStream(nethttp);
       if (written == contentLength) {
         Serial.println("Written : " + String(written) + " successfully");
@@ -312,6 +331,8 @@ void messageReceived(char *topic, byte *payload, unsigned int length)
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] : ");
+
+  std::string action = topic;
 
   payload[length] = 0; // ensure valid content is zero terminated so can treat as c-string
   Serial.println((char *)payload);
@@ -775,7 +796,9 @@ void NTPConnect(void)
 
 
 time_t periodic_timesync;
+
 // MQTT SSL requires a relatively accurate time between broker and client
+/*
 void SetTimeESP32() {
   time_t now = time(nullptr);
   Serial.print("Before time sync: ");
@@ -805,6 +828,46 @@ void SetTimeESP32() {
   Serial.print(ctime(&now));
   periodic_timesync = now;     // periodically resync the time to prevent drift
 }
+*/
+// time_t periodic_timesync;
+// MQTT SSL requires a relatively accurate time between broker and client
+void SetTimeESP32() {
+    static int i = 0;
+    static int last = 0;
+
+        NTP.setTimeZone (TZ_Asia_Kolkata);
+        NTP.setInterval (600);
+        NTP.setNTPTimeout (NTP_TIMEOUT);
+        // NTP.setMinSyncAccuracy (750);
+        // NTP.settimeSyncThreshold (500);
+        NTP.begin (ntpServer);
+
+
+    if ((millis () - last) > SHOW_TIME_PERIOD) {
+        last = millis ();
+        Serial.print (i); Serial.print ("\n");
+        payloadTimeDate = NTP.getTimeDateStringUs();
+        Serial.print (payloadTimeDate); Serial.print ("\n");
+        // int dd, mm, yyyy, h, m;
+        // float s;
+        // sscanf(NTP.getTimeDateStringUs (), "%02d/%02m/%04Y %02H:%02M:%02S",&dd, &mm, &yyyy, &h, &m, &s);
+        // int sec_int = static_cast<int>(s);
+        // float sec_float = (abs(s) - abs(sec_int)) * 1000;
+        // int sec_fra = static_cast<int>(sec_float);
+        // unsigned long tot_sec = h*60*60 + m*60 + sec_int;
+        // unsigned long tot_milisec = tot_sec*1000 + sec_fra;
+        // Serial.print (tot_milisec); Serial.print ("ms \n");
+        // periodic_timesync = tot_milisec;
+        //Serial.print (WiFi.isConnected () ? "connected" : "not connected"); Serial.print (". ");
+       // Serial.print ("Uptime: ");
+      //  Serial.print (NTP.getUptimeString ()); Serial.print (" since ");
+       // Serial.println (NTP.getTimeDateString (NTP.getFirstSyncUs ()));
+       // Serial.printf ("Free heap: %u\n", ESP.getFreeHeap ());
+        i++;
+    }
+    // delay (1000);
+}
+
 
 
 
@@ -817,7 +880,12 @@ void setup() {
 
   NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
   strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
-
+ // ntp stuff --------------
+    NTP.onNTPSyncEvent ([] (NTPEvent_t event) {
+        ntpEvent = event;
+        syncEventTriggered = true;
+    });
+  // ------------------------
   // Start Network connections
   WiFi.onEvent(NetworkEvent);
 
