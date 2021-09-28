@@ -22,6 +22,18 @@
 #include <Arduino.h>
 #include <ESPNtpClient.h>
 
+#define SHOW_TIME_PERIOD 1000
+#define NTP_TIMEOUT 1500
+
+const PROGMEM char* ntpServer = "pool.ntp.org";
+
+boolean syncEventTriggered = false; // True if a time even has been triggered
+NTPEvent_t ntpEvent; // Last triggered event
+double ntpOffset;
+double ntpTimeDelay;
+void setTimeESP32();
+static char *payloadTimeDate;  //  This is the date and time string we will be sending via MQTT
+
 // Watson IoT connection details
 static char MQTT_HOST[48];            // ORGID.messaging.internetofthings.ibmcloud.com
 static char MQTT_DEVICEID[30];        // Allocate a buffer large enough for "d:orgid:devicetype:deviceid"
@@ -596,7 +608,7 @@ void Send10Seconds2Cloud() {
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   payload["device_id"] = deviceID ;
-  payload["device_t"]  = time(nullptr);
+  payload["device_t"]  = payloadTimeDate;
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
@@ -645,7 +657,7 @@ void SendLiveData2Cloud() {
 
   // Load the key/value pairs into the serialized ArduinoJSON format
   payload["device_id"] = deviceID;
-  payload["device_t"]  = time(nullptr);
+  payload["device_t"]  = payloadTimeDate;
 
   // Generate an array of json objects that contain x,y,z arrays of 32 floats.
   // [{"x":[],"y":[],"z":[]},{"x":[],"y":[],"z":[]}]
@@ -781,36 +793,42 @@ void NetworkEvent(WiFiEvent_t event) {
 
 time_t periodic_timesync;
 // MQTT SSL requires a relatively accurate time between broker and client
-void SetTimeESP32() {
-  time_t now = time(nullptr);
-  Serial.print("Before time sync: ");
-  Serial.print(ctime(&now));
+void SetTimeESP32()
+{
+  static int i = 0;
+  static int last = 0;
 
-  // Set time from NTP servers
-  configTime(TZ_OFFSET * 3600, TZ_DST * 60, "time.nist.gov", "pool.ntp.org");
-  Serial.print("Waiting for time");
-  while(time(nullptr) <= 100000) {
-    NeoPixelStatus( LED_FIRMWARE_DFU ); // blink yellow
-    Serial.print(".");
-    delay(100);
-  }
-  unsigned timeout = 5000;
-  unsigned start = millis();
-  while (millis() - start < timeout) {
-      now = time(nullptr);
-      if (now > (2019 - 1970) * 365 * 24 * 3600) {
-          break;
-      }
-      delay(100);
-  }
-  delay(1000); // Wait for time to fully sync
+  NTP.setTimeZone(TZ_Asia_Kolkata); // This can be set to whatever region you want
+  NTP.setInterval(600);
+  NTP.setNTPTimeout(NTP_TIMEOUT);
+  // NTP.setMinSyncAccuracy (750);
+  // NTP.settimeSyncThreshold (500);
+  NTP.begin(ntpServer);
 
-  Serial.print("\nAfter time sync : ");
-  now = time(nullptr);
-  Serial.print(ctime(&now));
-  periodic_timesync = now;     // periodically resync the time to prevent drift
+  if ((millis() - last) > SHOW_TIME_PERIOD)
+  {
+    last = millis();
+    Serial.print(i);  //  just to count the number of time we sync with NTP
+    Serial.print("\n");
+    payloadTimeDate = NTP.getTimeDateStringUs();
+    Serial.print(payloadTimeDate);
+    //  periodic_timesync = payloadTimeDate can be done using a small algorithm if needed, as it's a matter of converting this char string to long type milliseconds
+    // The algorithm I suggest:
+    // int dd, mm, yyyy, h, m;
+    // float s;
+    // sscanf(NTP.getTimeDateStringUs (), "%02d/%02m/%04Y %02H:%02M:%02S",&dd, &mm, &yyyy, &h, &m, &s);
+    // int sec_int = static_cast<int>(s);
+    // float sec_float = (abs(s) - abs(sec_int)) * 1000;
+    // int sec_fra = static_cast<int>(sec_float);
+    // unsigned long tot_sec = h*60*60 + m*60 + sec_int;
+    // unsigned long tot_milisec = tot_sec*1000 + sec_fra;
+    // Serial.print (tot_milisec); Serial.print ("ms \n");
+    // periodic_timesync = tot_milisec;
+    Serial.print("\n");
+    i++;
+  }
+  // delay (1000);
 }
-
 
 void setup() {
   // Start serial console
@@ -823,6 +841,14 @@ void setup() {
   // Starting the ESP with the LEDs on can cause brownouts
   NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
   strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
+
+  // ntp setup --------------
+  NTP.onNTPSyncEvent([](NTPEvent_t event)
+                     {
+                       ntpEvent = event;
+                       syncEventTriggered = true;
+                     });
+  // ------------------------
 
   // Start Network connections
   WiFi.onEvent(NetworkEvent);
