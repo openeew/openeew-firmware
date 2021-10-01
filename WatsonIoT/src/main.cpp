@@ -841,7 +841,17 @@ void setup() {
   // Starting the ESP with the LEDs on can cause brownouts
   NeoPixelStatus( LED_OFF ); // turn off the LED to reduce power consumption
   strip.setBrightness(50);  // Dim the LED to 20% - 0 off, 255 full bright
-
+//--------- Work on making NTP Time sync run on core 0
+/*
+ * xTaskCreatePinnedToCore(  // Use xTaskCreate() in vanilla FreeRTOS
+              toggleLED_1,  // Function to be called
+              "Toggle 1",   // Name of task
+              1024,         // Stack size (bytes in ESP32, words in FreeRTOS)
+              NULL,         // Parameter to pass to function
+              0,            // Task priority (0 to configMAX_PRIORITIES - 1)
+              NULL,         // Task handle
+              app_cpu);     // Run on one core for demo purposes (ESP32 only)
+ */
   // ntp setup --------------
   NTP.onNTPSyncEvent([](NTPEvent_t event)
                      {
