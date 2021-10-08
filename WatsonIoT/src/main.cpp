@@ -18,6 +18,16 @@
 #include "soc/soc.h"            // Enable/Disable BrownOut detection
 #include "soc/rtc_cntl_reg.h"
 
+// NTP Client Required Libraries
+#include <Arduino.h>
+#include <ESPNtpClient.h>
+
+#define NTP_TIMEOUT 1500
+
+const PROGMEM char* ntpServer = "pool.ntp.org";
+boolean syncEventTriggered = false; // True if a time even has been triggered
+NTPEvent_t ntpEvent; // Last triggered event
+
 // Watson IoT connection details
 static char MQTT_HOST[48];            // ORGID.messaging.internetofthings.ibmcloud.com
 static char MQTT_DEVICEID[30];        // Allocate a buffer large enough for "d:orgid:devicetype:deviceid"
@@ -783,7 +793,11 @@ void SetTimeESP32() {
   Serial.print(ctime(&now));
 
   // Set time from NTP servers
-  configTime(TZ_OFFSET * 3600, TZ_DST * 60, "time.nist.gov", "pool.ntp.org");
+  NTP.setTimeZone(TZ_America_New_York	); // This can be set to whatever region you want
+  NTP.setInterval(600);
+  NTP.setNTPTimeout(NTP_TIMEOUT);
+  NTP.begin(ntpServer);
+
   Serial.print("Waiting for time");
   while(time(nullptr) <= 100000) {
     NeoPixelStatus( LED_FIRMWARE_DFU ); // blink yellow
@@ -822,6 +836,13 @@ void setup() {
 
   // Start Network connections
   WiFi.onEvent(NetworkEvent);
+
+  // ntp setup
+  NTP.onNTPSyncEvent([](NTPEvent_t event)
+                     {
+                       ntpEvent = event;
+                       syncEventTriggered = true;
+                     });
 
   // Start the ETH interface, if it is available, before WiFi
   ETH.begin(ETH_ADDR, ETH_POWER_PIN, ETH_MDC_PIN, ETH_MDIO_PIN, ETH_TYPE, ETH_CLK_MODE);
