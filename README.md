@@ -1,6 +1,12 @@
 # OpenEEW Sensor Firmware
 This firmware allows an OpenEEW ESP32 sensor to connect to an MQTT broker and send a JSON containing accelerations from the x,y and z axis every second.
 
+## Quickstart
+Please follow this video to setup your sensor/mqtt/earthquake detection system:
+
+[![Watch the video](/images/video_thumb.png)](https://youtu.be/H-BQhVVhSsI)
+
+
 ## Setup sensor and MQTT
 Add your sensor details in `src/secrets.h`:
 - `user` This is a unique name of the sensor network owner
