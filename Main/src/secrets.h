@@ -3,8 +3,8 @@
 // ========= Add Station Infomation for this sensor ===========================================
 // This needs to be done for every sensor you flash
 char user[40] = "AMEIRA";   // add user code,eg JBIEBER
-char network[10] = "GR";     // add 2 digit network code, eg GR
-char station[10] = "GR002";  // add 5 digit station code, eg ST001
+char network[2] = "GR";     // add 2 digit network code, eg GR
+char station[5] = "GR002";  // add 5 digit station code, eg ST001
 
 
 // ========================== add your MQTT credentials =======================================
