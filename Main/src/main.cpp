@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <Adxl355.h> // forked from https://github.com/markrad/esp32-ADXL355
+#include <Wire.h>
 #include <I2Cdev.h>
 #include <ADXL345.h>
 #include <math.h>
@@ -88,7 +89,7 @@ double time_since_NTP;
 double device_t;
 
 // --------------------------------------------------------------------------------------------
-// ADXL Accelerometer
+// ADXL355 Accelerometer
 void IRAM_ATTR isr_adxl();
 int32_t Adxl355SampleRate = 31; // Reporting Sample Rate [31,125]
 int8_t CHIP_SELECT_PIN_ADXL = 15;
@@ -106,6 +107,10 @@ int LTA_len = 320; // can change to 1250
 int QUE_len = LTA_len + STA_len;
 bool STALTAMODE = false;
 double TrueSampleRate;
+
+// ADXL 345 Accelerometer
+ADXL345 adxl345;
+bool adxl345_flag = true;
 
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
@@ -1351,7 +1356,19 @@ void setup()
   client.setServer(MQTT_HOST, MQTT_PORT);
   client.setCallback(messageReceived);
 
+  Wire.begin();
+  adxl345.initialize();
+  if (adxl345.testConnection())
+  {
+    DEBUG("ADXL345 connection SUCCESSFUL!\n")
+    adxl345_flag = true;
+    adxl345.setRange(ADXL345_RANGE_2G); //  sets +/- 2g range
+  }
 
+  else
+  {
+    adxl345_flag = false;
+    Serial.println("ADXL345 not connected!\n");
 #if OPENEEW_SAMPLE_RATE_125
   odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
 #endif
@@ -1367,6 +1384,7 @@ void setup()
   spi1 = new SPIClass(HSPI);
   adxl355.initSPI(*spi1);
   StartADXL355();
+  }
 
   ledcSetup(channel, freq, resolution);
   ledcAttachPin(io, channel);
@@ -1403,16 +1421,35 @@ void loop()
     if (fifoFull)
     {
       fifoFull = false;
-      adxstatus = adxl355.getStatus();
-
-      if (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL)
+      if (!adxl345_flag)
+      {
+        adxstatus = adxl355.getStatus();  
+      }
+      
+      if ( (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL) || adxl345.getFIFOTriggerOccurred() )
       {
 
         // Keep track of the heap in case heap fragmentation returns
         // Serial.println( xPortGetFreeHeapSize() );
-        int numEntriesFifo = adxl355.readFifoEntries((long *)fifoOut);
-        // numEntriesFifo = numEntriesFifo-1;
-
+        int numEntriesFifo;
+        if (!adxl345_flag)
+        {
+          numEntriesFifo = adxl355.readFifoEntries((long *)fifoOut);
+        }  // numEntriesFifo = numEntriesFifo-1;
+        else
+        {
+          numEntriesFifo = adxl345.getFIFOLength();
+          int16_t x_accel, y_accel, z_accel;
+          for (int i = 0; i < 32; i++)
+          {
+              adxl345.getAcceleration(&x_accel, &y_accel, &z_accel);
+              fifoOut[i][0] = x_accel;
+              fifoOut[i][1] = y_accel;
+              fifoOut[i][2] = z_accel;
+          }
+          DEBUG("Got adxl345 acceleration\n");
+        }
+      
         if (numEntriesFifo != -1)
         {
           // Declare one AccelReading structure for this iteration of loop()
