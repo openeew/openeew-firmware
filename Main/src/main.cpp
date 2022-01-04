@@ -10,6 +10,8 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <Adxl355.h> // forked from https://github.com/markrad/esp32-ADXL355
+#include <I2Cdev.h>
+#include <ADXL345.h>
 #include <math.h>
 #include "config.h"
 #include "secrets.h" //  MQTT and Sensor information
