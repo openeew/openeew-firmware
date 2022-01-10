@@ -10,6 +10,8 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <Adxl355.h> // forked from https://github.com/markrad/esp32-ADXL355
+#include <Wire.h>
+#include <ADXL345_WE.h> // forked from https://github.com/wollewald/ADXL345_WE
 #include <math.h>
 #include "config.h"
 #include "secrets.h" //  MQTT and Sensor information
@@ -105,6 +107,11 @@ int QUE_len = LTA_len + STA_len;
 bool STALTAMODE = false;
 double TrueSampleRate;
 
+// ADXL345
+#define ADXL345_I2CADDR 0x53  // 0x1D if SDO = HIGH
+const int ADXL345_int2Pin = 2;
+ADXL345_WE adxl345 = ADXL345_WE(ADXL345_I2CADDR);
+static bool is_adxl345 = true;
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
 // 10 second FIFO queue for STA / LTA algorithm
@@ -243,6 +250,10 @@ void StartADXL355()
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 1); // enable brownout detector
 }
 
+void startADXL345()
+{
+  // TODO Calibratiopn
+}
 
 // Pub-sub errror messages
 void pubSubErr(int8_t MQTTErr)
@@ -1348,23 +1359,40 @@ void setup()
 
   client.setServer(MQTT_HOST, MQTT_PORT);
   client.setCallback(messageReceived);
-
+  Wire.begin();
+  pinMode(ADXL345_int2Pin, INPUT);
+  if (!adxl345.init())
+  {
+    Serial.println("ADXL345 not connected!\n");
 
 #if OPENEEW_SAMPLE_RATE_125
-  odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
+    odr_lpf = Adxl355::ODR_LPF::ODR_125_AND_31_25;
 #endif
 
 #if OPENEEW_SAMPLE_RATE_31_25
-  odr_lpf = Adxl355::ODR_LPF::ODR_31_25_AND_7_813;
+    odr_lpf = Adxl355::ODR_LPF::ODR_31_25_AND_7_813;
 #endif
 
-  pinMode(ADXL_INT_PIN, INPUT);
-  pinMode(CHIP_SELECT_PIN_ADXL, OUTPUT);
-  attachInterrupt(digitalPinToInterrupt(ADXL_INT_PIN), isr_adxl, FALLING);
+    pinMode(ADXL_INT_PIN, INPUT);
+    pinMode(CHIP_SELECT_PIN_ADXL, OUTPUT);
+    attachInterrupt(digitalPinToInterrupt(ADXL_INT_PIN), isr_adxl, FALLING);
 
-  spi1 = new SPIClass(HSPI);
-  adxl355.initSPI(*spi1);
-  StartADXL355();
+    spi1 = new SPIClass(HSPI);
+    adxl355.initSPI(*spi1);
+    StartADXL355();
+  }
+  else
+  {
+    Serial.println("ADXL345 connected!\n");
+    adxl345.setDataRate(ADXL345_DATA_RATE_12_5);
+    adxl345.setRange(ADXL345_RANGE_2G);
+    adxl345.setActivityParameters(ADXL345_DC_MODE, ADXL345_XY0, 0.6);
+    adxl345.setInterrupt(ADXL345_ACTIVITY, INT_PIN_2);
+    adxl345.setFifoParameters(ADXL345_TRIGGER_INT_1, 32);
+    adxl345.setFifoMode(ADXL345_STREAM);
+    attachInterrupt(digitalPinToInterrupt(ADXL345_int2Pin), isr_adxl, RISING);
+    DEBUG("ADXL345 setup done!\n")
+  }
 
   ledcSetup(channel, freq, resolution);
   ledcAttachPin(io, channel);
@@ -1395,52 +1423,79 @@ void loop()
   else
   {
     client.loop();
-
+    
     //====================== ADXL Accelerometer =====================
 
-    if (fifoFull)
+    if (fifoFull || true) // true added temporarily
     {
       fifoFull = false;
-      adxstatus = adxl355.getStatus();
-
-      if (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL)
+      if (!is_adxl345)
       {
-
+        adxstatus = adxl355.getStatus();
+      }
+      if ( (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL) || is_adxl345 )
+      {
+        AccelReading AccelRecord;
         // Keep track of the heap in case heap fragmentation returns
         // Serial.println( xPortGetFreeHeapSize() );
-        int numEntriesFifo = adxl355.readFifoEntries((long *)fifoOut);
-        // numEntriesFifo = numEntriesFifo-1;
+        if (is_adxl345)
+        {        
+          int numEntriesFifo = -1; // adxl355.readFifoEntries((long *)fifoOut);  // debug
+          // numEntriesFifo = numEntriesFifo-1;
 
-        if (numEntriesFifo != -1)
-        {
-          // Declare one AccelReading structure for this iteration of loop()
-          // so it doesn't need to go in and out of scope in various for() loops below
-          //   typedef struct AccelXYZ {
-          //     double x; double y; double z;
-          //   } AccelReading ;
-
-          AccelReading AccelRecord;
-
-          // [{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]},{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]}]
-          double gal;
-          double x, y, z;
-          for (int i = 0; i < numEntriesFifo; i++)
+          if ( (numEntriesFifo != -1 ) && false)  // false added while debugging ADXL345
           {
-            gal = adxl355.valueToGals(fifoOut[i][0]);
-            x = round(gal * 1000) / 1000;
-            AccelRecord.x = x;
+            // Declare one AccelReading structure for this iteration of loop()
+            // so it doesn't need to go in and out of scope in various for() loops below
+            //   typedef struct AccelXYZ {
+            //     double x; double y; double z;
+            //   } AccelReading ;
 
-            gal = adxl355.valueToGals(fifoOut[i][1]);
-            y = round(gal * 1000) / 1000;
-            AccelRecord.y = y;
+            // [{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]},{"x":[9.479,0],"y":[0.128,-1.113],"z":[-0.185,123.321]}]
+            double gal;
+            double x, y, z;
+            for (int i = 0; i < numEntriesFifo; i++)
+            {
+              gal = adxl355.valueToGals(fifoOut[i][0]);
+              x = round(gal * 1000) / 1000;
+              AccelRecord.x = x;
 
-            gal = adxl355.valueToGals(fifoOut[i][2]);
-            z = round(gal * 1000) / 1000;
-            AccelRecord.z = z;
+              gal = adxl355.valueToGals(fifoOut[i][1]);
+              y = round(gal * 1000) / 1000;
+              AccelRecord.y = y;
 
-            StaLtaQue.push(&AccelRecord);
+              gal = adxl355.valueToGals(fifoOut[i][2]);
+              z = round(gal * 1000) / 1000;
+              AccelRecord.z = z;
+
+              StaLtaQue.push(&AccelRecord);
+            }
           }
+          else
+          {
+            DEBUG("XYZ Entry\n")
+            adxl345.setMeasureMode(false);
+            String axes = adxl345.getActTapStatusAsString();
+            byte intSource = adxl345.readAndClearInterrupts();
+            for(int i=0; i<32; i++){
+              xyzFloat g = adxl345.getGValues();
+              
+              DEBUG("g-x   = ");
+              DEBUG(g.x);
+              AccelRecord.x = g.x;
+              DEBUG("  |  g-y   = ");
+              DEBUG(g.y);
+              AccelRecord.y = g.y;
+              DEBUG("  |  g-z   = ");
+              DEBUG(g.z);
+              AccelRecord.z = g.z;
 
+              StaLtaQue.push(&AccelRecord);
+            }
+            adxl345.readAndClearInterrupts();
+            adxl345.setMeasureMode(true);
+          }
+          
           if (STALTAMODE)
           {
             // Do some STA / LTA math here...
