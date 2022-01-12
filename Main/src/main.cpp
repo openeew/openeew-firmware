@@ -1364,9 +1364,9 @@ void setup()
 
   client.setServer(MQTT_HOST, MQTT_PORT);
   client.setCallback(messageReceived);
+
   Wire.begin();
-  pinMode(ADXL345_int2Pin, INPUT);
-  if (!adxl345.init())
+  if (!adxl345.init())  // if ADXL345 not connected properly via I2C
   {
     Serial.println("ADXL345 not connected!\n");
 
