@@ -252,7 +252,12 @@ void StartADXL355()
 
 void startADXL345()
 {
-  // TODO Calibratiopn
+  adxl345.setDataRate(ADXL345_DATA_RATE_50);
+  adxl345.setRange(ADXL345_RANGE_2G);
+  adxl345.setActivityParameters(ADXL345_DC_MODE, ADXL345_XY0, 0.6);
+  adxl345.setInterrupt(ADXL345_WATERMARK, INT_PIN_2);
+  adxl345.setFifoParameters(ADXL345_TRIGGER_INT_1, 32);
+  adxl345.setFifoMode(ADXL345_STREAM);
 }
 
 // Pub-sub errror messages
@@ -1383,14 +1388,10 @@ void setup()
   }
   else
   {
-    Serial.println("ADXL345 connected!\n");
-    adxl345.setDataRate(ADXL345_DATA_RATE_12_5);
-    adxl345.setRange(ADXL345_RANGE_2G);
-    adxl345.setActivityParameters(ADXL345_DC_MODE, ADXL345_XY0, 0.6);
-    adxl345.setInterrupt(ADXL345_ACTIVITY, INT_PIN_2);
-    adxl345.setFifoParameters(ADXL345_TRIGGER_INT_1, 32);
-    adxl345.setFifoMode(ADXL345_STREAM);
+    pinMode(ADXL345_int2Pin, INPUT);
     attachInterrupt(digitalPinToInterrupt(ADXL345_int2Pin), isr_adxl, RISING);
+    Serial.println("ADXL345 connected!\n");
+    startADXL345();
     DEBUG("ADXL345 setup done!\n")
   }
 
@@ -1423,27 +1424,33 @@ void loop()
   else
   {
     client.loop();
-    
+    bool is_adxl355 = false;
     //====================== ADXL Accelerometer =====================
-
-    if (fifoFull || true) // true added temporarily
+    if (fifoFull)
     {
       fifoFull = false;
-      if (!is_adxl345)
+      if (!is_adxl345 )
       {
         adxstatus = adxl355.getStatus();
+        is_adxl355 = adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL;
       }
-      if ( (adxstatus & Adxl355::STATUS_VALUES::FIFO_FULL) || is_adxl345 )
+      if ( is_adxl355 || is_adxl345 )
       {
         AccelReading AccelRecord;
         // Keep track of the heap in case heap fragmentation returns
         // Serial.println( xPortGetFreeHeapSize() );
-        if (is_adxl345)
-        {        
-          int numEntriesFifo = -1; // adxl355.readFifoEntries((long *)fifoOut);  // debug
+        // if (is_adxl345)
+        // {
+          static int numEntriesFifo = -1;
+          if (!is_adxl345)
+          {
+            numEntriesFifo = adxl355.readFifoEntries((long *)fifoOut);
+          }
+
+            // debug
           // numEntriesFifo = numEntriesFifo-1;
 
-          if ( (numEntriesFifo != -1 ) && false)  // false added while debugging ADXL345
+          if ( numEntriesFifo != -1 )
           {
             // Declare one AccelReading structure for this iteration of loop()
             // so it doesn't need to go in and out of scope in various for() loops below
@@ -1475,19 +1482,17 @@ void loop()
           {
             DEBUG("XYZ Entry\n")
             adxl345.setMeasureMode(false);
-            String axes = adxl345.getActTapStatusAsString();
-            byte intSource = adxl345.readAndClearInterrupts();
             for(int i=0; i<32; i++){
               xyzFloat g = adxl345.getGValues();
               
-              DEBUG("g-x   = ");
-              DEBUG(g.x);
+              DEBUG_IL("g-x   = ");
+              DEBUG_IL(g.x);
               AccelRecord.x = g.x;
-              DEBUG("  |  g-y   = ");
-              DEBUG(g.y);
+              DEBUG_IL("  |  g-y   = ");
+              DEBUG_IL(g.y);
               AccelRecord.y = g.y;
-              DEBUG("  |  g-z   = ");
-              DEBUG(g.z);
+              DEBUG_IL("  |  g-z   = ");
+              DEBUG_IL(g.z);
               AccelRecord.z = g.z;
 
               StaLtaQue.push(&AccelRecord);
@@ -1662,7 +1667,7 @@ void loop()
             for (int i = 0; i < 32; i++)
               StaLtaQue.drop();
           }
-        }
+        // }
       }
     }
 
