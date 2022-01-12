@@ -111,7 +111,6 @@ double TrueSampleRate;
 #define ADXL345_I2CADDR 0x53  // 0x1D if SDO = HIGH
 const int ADXL345_int2Pin = 2;
 ADXL345_WE adxl345 = ADXL345_WE(ADXL345_I2CADDR);
-static bool is_adxl345 = true;
 // --------------------------------------------------------------------------------------------
 // Variables to hold accelerometer data
 // 10 second FIFO queue for STA / LTA algorithm
@@ -1424,7 +1423,6 @@ void loop()
   else
   {
     client.loop();
-    bool is_adxl355 = false;
     //====================== ADXL Accelerometer =====================
     if (fifoFull)
     {
