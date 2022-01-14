@@ -1,7 +1,10 @@
-
 // Add timezone, if not UTC
 int8_t TIME_ZONE = 0; // UTC
 uint8_t DST = 0;
+
+// ADXL Flags
+static bool is_adxl345 = true;
+static bool is_adxl355 = false;
 
 // debugging
 #define debug true
