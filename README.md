@@ -4,8 +4,8 @@ This firmware allows an OpenEEW ESP32 sensor to connect to an MQTT broker and se
 ## Quickstart
 Please follow this video to setup your sensor/mqtt/earthquake detection system:
 
-[![Watch the video](/images/video_thumb.png)](https://youtu.be/H-BQhVVhSsI)
 
+https://user-images.githubusercontent.com/6279965/149570867-ff087634-d804-4c34-9979-01fcf300cfa9.mp4
 
 ## Setup sensor and MQTT
 Add your sensor details in `src/secrets.h`:
