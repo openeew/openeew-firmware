@@ -55,24 +55,18 @@ bool Adxl355::isDeviceRecognized()
 
 int Adxl355::start()
 {
-  int result = 0;
-
   if (!isDeviceRecognized())
-  {
-    result = -1;
-  }
-  else
-  {
-    uint8_t power = read8(POWER_CTL);
+    return -1; // Return if Device is not recognized
 
-    if (power & POWER_CTL_VALUES::POWER_CTL_OFF)
-    {
-      power = power & (int)POWER_CTL_VALUES::POWER_CTL_ON;
-      write8(POWER_CTL, power);
-    }
+  uint8_t power = read8(POWER_CTL);
+
+  if (power & POWER_CTL_VALUES::POWER_CTL_OFF)
+  {
+    power = power & (int)POWER_CTL_VALUES::POWER_CTL_ON;
+    write8(POWER_CTL, power);
   }
 
-  return result;
+  return 0;
 }
 
 int Adxl355::stop()
@@ -482,17 +476,13 @@ int Adxl355::readFifoEntries(long *output)
   {
     int result = readBlock(FIFO_DATA, 9, (uint8_t *)data);
 
-    if (result > 0)
-    {
-      for (int j = 0; j < 9; j += 3)
-      {
-        work[j / 3] = (data[0 + j] << 12) | (data[1 + j] << 4) | (data[2 + j] >> 4);
-        output[i * 3 + j / 3] = twosComplement(work[j / 3]);
-      }
-    }
-    else
-    {
+    if (result <= 0)
       return -1;
+
+    for (int j = 0; j < 9; j += 3)
+    {
+      work[j / 3] = (data[0 + j] << 12) | (data[1 + j] << 4) | (data[2 + j] >> 4);
+      output[i * 3 + j / 3] = twosComplement(work[j / 3]);
     }
   }
 
@@ -521,15 +511,12 @@ int64_t Adxl355::valueToGalsInt(int32_t rawValue, int decimals)
 
 bool Adxl355::errorIfRunning()
 {
-  bool result = false;
+  if (!isRunning())
+    return false; // No error when device is not running
 
-  if (isRunning())
-  {
-    Serial.println("*** ERROR *** Sensor modification attempted when sensor is running");
-    result = true;
-  }
+  Serial.println("*** ERROR *** Sensor modification attempted when sensor is running");
 
-  return result;
+  return true;
 }
 
 long Adxl355::twosComplement(unsigned long value)
